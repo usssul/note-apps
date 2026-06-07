@@ -22,16 +22,26 @@
 
 ## 项目启动
 
-### 初始化
+### 环境变量配置
+
+项目使用两层环境变量：
+
+| 文件 | 用途 | Git |
+|------|------|-----|
+| 根目录 `.env` | Docker Compose 密码 | ❌ gitignored |
+| 根目录 `.env.example` | Docker Compose 模板 | ✅ |
+| `note-mark/.env.local` | 后端本地开发配置 | ❌ gitignored |
+| `note-mark/.env.example` | 后端配置模板 | ✅ |
 
 ```bash
-# 克隆仓库
-git clone https://github.com/usssul/note-apps.git
-cd note-apps
-
-# 环境变量
+# 1. 配置 Docker 密码
 cp .env.example .env
-# 编辑 .env 填入密码（默认值仅开发可用）
+# 编辑 .env，确保密码与后端 .env.local 中的一致
+
+# 2. 后端配置（已有 .env.local 可跳过）
+cd note-mark
+cp .env.example .env.local
+# 编辑 .env.local 填入本地数据库连接信息
 ```
 
 ### 启动基础设施
@@ -53,14 +63,19 @@ docker compose up -d
 
 ```bash
 cd note-mark
-cp .env.example .env
-# 编辑 .env 配置数据库连接等
-
 pnpm install
-pnpm start:dev
+
+# 重要：ConfigModule 按 NODE_ENV 加载配置文件
+# - NODE_ENV=local → 优先读取 .env.local
+# - 不设 NODE_ENV → 默认也读取 .env.local（.env.${NODE_ENV || 'local'}）
+NODE_ENV=local pnpm start:dev
 # → http://localhost:6090
 # → Swagger: http://localhost:6090/api-docs
 ```
+
+**配置文件加载顺序**：`.env.${NODE_ENV}` → `.env`，详见 [app.module.ts](../note-mark/src/app.module.ts#L19-L24)。
+
+启动时后台任务会自动执行一次 my903 数据抓取（可通过 `MY903_FETCH_COLUMNS` 环境变量控制抓取栏目）。
 
 ### 启动前端 (note-web)
 
@@ -68,11 +83,11 @@ pnpm start:dev
 cd note-web
 pnpm install
 pnpm dev
-# → http://localhost:5173
+# → http://localhost:5174  （端口在 vite.config.ts 中硬编码）
 ```
 
-开发时代理规则（Vite 配置）：
-- `/dev` → `http://127.0.0.1:6090`（后端 API）
+开发时 Vite 代理配置（[vite.config.ts](../note-web/vite.config.ts#L55-L61)）：
+- `/dev` → `http://127.0.0.1:6090`（后端 API），路径重写时去掉 `/dev` 前缀
 - 生产环境 `/api` → 同源 Nginx 反代
 
 ---
@@ -138,13 +153,30 @@ pnpm preview        # 预览构建结果
 
 ```bash
 # 连接 MySQL
-mysql -h 127.0.0.1 -P 3308 -u root -p
+mysql -h 127.0.0.1 -P 3308 -u root -p   # 密码见根目录 .env
 
 # 连接 MongoDB
-mongosh mongodb://admin:password@localhost:27091/notemark
+mongosh mongodb://admin:buwanla@localhost:27091/notemark?authSource=admin
 
 # MinIO 管理面板
 open http://localhost:9001
+```
+
+### 验证服务
+
+```bash
+# 检查后端健康
+curl http://localhost:6090/
+# → {"code":200,...,"data":"Hello World!"}
+
+# 检查音乐数据（首次启动时自动抓取 10 条）
+curl 'http://localhost:6090/my903/list?page=1&pageSize=2'
+
+# 检查 Swagger 文档
+open http://localhost:6090/api-docs
+
+# 检查前端（通过 Vite 代理访问后端）
+curl 'http://localhost:5174/dev/my903/list?page=1&pageSize=2'
 ```
 
 ---
@@ -195,3 +227,55 @@ bash build.sh <tag>
 - [note-mark/.env.example](../note-mark/.env.example)
 - [nest-minio/.env.example](../nest-minio/.env.example)
 - [根目录 .env.example](../.env.example)（Docker Compose 使用）
+
+---
+
+## 常见问题
+
+### Docker 容器密码不匹配
+
+如果 Docker 容器启动后后端连不上，检查根目录 `.env` 密码是否与后端 `.env.local` 一致：
+
+```bash
+# 根 .env → Docker Compose 用
+MYSQL_ROOT_PASSWORD=root
+MONGO_ROOT_PASSWORD=buwanla
+MINIO_ROOT_PASSWORD=12345678
+
+# note-mark/.env.local → 后端用
+DB_PASSWORD=root
+MONGODB_URI=mongodb://admin:buwanla@localhost:27091/...
+MINIO_SECRET_KEY=12345678
+```
+
+如果不一致，先 `docker compose down -v` 然后重建容器。
+
+### 前端跨域 CORS 错误
+
+后端 CORS 白名单在 [main.ts](../note-mark/src/main.ts#L16-L19) 中配置。如果前端端口不是 5173/5174，需要添加对应 origin。
+
+### 端口占用
+
+- 后端默认 `6090`
+- 前端默认 `5174`（[vite.config.ts](../note-web/vite.config.ts#L53) 中硬编码）
+- 如果 5174 被占用，Vite 会自动尝试下一个端口
+
+### 后端启动报 MinIO 环境变量缺失
+
+`note-mark/.env.local` 必须包含所有 MinIO 配置项：
+`MINIO_ENDPOINT`、`MINIO_PORT`、`MINIO_ACCESS_KEY`、`MINIO_SECRET_KEY`、`MINIO_BUCKET_NAME`、`MINIO_USE_SSL`
+
+### MySQL 表 structure
+
+后端使用 TypeORM，如果表不存在可能需要手动建表或临时开启 `DB_SYNC=true`（注意：生产环境不要开启）。
+
+### 代理无法访问外部 API（my903 抓取失败）
+
+如果 my903.com 无法直连，在 `.env.local` 中配置代理：
+
+```env
+HTTP_PROXY=http://127.0.0.1:7890
+HTTPS_PROXY=http://127.0.0.1:7890
+```
+
+代理配置在 [axios.config.ts](../note-mark/src/config/axios.config.ts) 中生效。
