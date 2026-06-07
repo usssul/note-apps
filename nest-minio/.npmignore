@@ -1,0 +1,35 @@
+# 源代码
+src/
+test/
+
+# 配置文件
+tsconfig.json
+tsconfig.build.json
+nest-cli.json
+jest.config.js
+.eslintrc.js
+.prettierrc
+
+# 开发文件
+*.spec.ts
+*.e2e-spec.ts
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志和缓存
+*.log
+*.tgz
+coverage/
+node_modules/
+dist/main/
+dist/app.*
+dist/dto/
+dist/static/

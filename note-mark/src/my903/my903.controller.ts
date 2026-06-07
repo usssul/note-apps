@@ -1,0 +1,102 @@
+import { Controller, Get, Post, Body, Patch, Param, Delete, Query, Inject, HttpException, HttpStatus } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { My903Service } from './my903.service';
+import { CreateMy903DTO } from './dto/create-my903.dto';
+import { My903 } from './entities/my903.entity';
+import { MinioHelperService } from '../common/services/minio-helper.service';
+import { ResponseDto } from 'src/common/dto/response.dto';
+
+
+@Controller('my903')
+@ApiTags('my903')
+export class My903Controller {
+
+  @Inject(My903Service)
+  private readonly my903Service: My903Service;
+
+  @Inject(MinioHelperService)
+  private readonly minioHelperService: MinioHelperService;
+
+  @Post('create')
+  @ApiOperation({ summary: '创建My903内容' })
+  async create(@Body() createMy903Dto: CreateMy903DTO): Promise<My903> {
+    createMy903Dto.cover = await this.minioHelperService.uploadByUrlToBucket(createMy903Dto.thumbnail.src, 'my903')
+    return this.my903Service.createOrUpdate(createMy903Dto);
+  }
+
+  @Post('batchCreate')
+  @ApiOperation({ summary: '批量创建/更新My903内容' })
+  async batchCreate(
+    @Body() items: CreateMy903DTO[],
+  ): Promise<any[]> {
+    return await this.my903Service.batchCreate(items)
+  }
+
+  @Get('fetchNew')
+  @ApiOperation({ summary: '获取最新的My903内容' }) @ApiQuery({ name: 'id', required: false, description: '起始ID（分页用）' })
+  @ApiQuery({ name: 'limit', required: false, description: '返回数量，默认10' })
+  async fetchNew(
+    @Query('id', { transform: (value) => value || '9' }) id?: string,
+    @Query('limit', { transform: (value) => parseInt(value, 10) || 10 }) limit?: number
+  ): Promise<ResponseDto> {
+    try {
+      const data = await this.my903Service.fetchNew(id, limit);
+      return ResponseDto.success(data, '最新内容已成功抓取并保存');
+    } catch (error) {
+      console.error('[My903Controller] fetchNew 错误:', error);
+      throw new HttpException(
+        `获取最新内容失败: ${error.message}`,
+        HttpStatus.INTERNAL_SERVER_ERROR
+      );
+    }
+  }
+
+  @Get('list')
+  @ApiOperation({ summary: '查询所有My903内容' })
+  @ApiQuery({ name: 'page', required: false, example: 1, description: '页码' })
+  @ApiQuery({ name: 'limit', required: false, example: 10, description: '每页条数' })
+  @ApiQuery({ name: 'tag', required: false, example: '派台歌', description: '按标签筛选' })
+  async findAll(
+    @Query('page') page = 1,
+    @Query('limit') limit = 10,
+    @Query('tag') tag?: string,
+  ) {
+    return await this.my903Service.findAll({
+      page: Number(page),
+      limit: Number(limit),
+      tag,
+    });
+  }
+
+  @Get('singer_list')
+  async findAllSinger() {
+    return this.my903Service.findAllSinger();
+  }
+
+  @Get('sync-info')
+  @ApiOperation({ summary: '获取所有栏目的同步信息' })
+  async getSyncInfo() {
+    return this.my903Service.getSyncInfo();
+  }
+
+  @Get('sync-info/:columnId')
+  @ApiOperation({ summary: '根据栏目 ID 获取同步信息' })
+  @ApiParam({ name: 'columnId', description: '栏目 ID（如7, 8, 9）', example: '9' })
+  async getSyncInfoByColumn(@Param('columnId') columnId: string) {
+    return this.my903Service.getSyncInfoByColumn(columnId);
+  }
+
+  @Get('detail/:article_id')
+  @ApiOperation({ summary: '根据article_id查询My903内容详情' })
+  @ApiParam({ name: 'article_id', description: '内容唯一标识', example: 5382 })
+  async findByarticle_id(@Param('article_id') article_id: string) {
+    return this.my903Service.findByarticle_id(Number(article_id));
+  }
+
+  @Get('statistics')
+  @ApiOperation({ summary: '获取My903内容总数统计' })
+  async getStatistics() {
+    return ResponseDto.success(await this.my903Service.getStatistics(), '获取统计信息成功');
+  }
+
+}
