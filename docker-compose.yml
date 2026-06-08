@@ -17,7 +17,7 @@ services:
       retries: 5
 
   mongodb:
-    image: mongo:7
+    image: mongo:8
     container_name: note-mark-mongo
     restart: unless-stopped
     ports:
@@ -26,7 +26,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-changeme}
     volumes:
-      - mongo_data:/data/db
+      - /Users/treblec/Documents/mydata/my903-data/data:/data/db
 
   minio:
     image: minio/minio:latest
@@ -39,10 +39,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-admin}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-changeme}
     volumes:
-      - minio_data:/data
+      - /Users/treblec/Documents/mydata/minio/data:/data
     command: server /data --console-address ":9001"
 
 volumes:
   mysql_data:
-  mongo_data:
-  minio_data:

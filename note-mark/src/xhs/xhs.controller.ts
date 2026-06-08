@@ -213,6 +213,21 @@ export class XhsController {
     }
   }
 
+  /**
+   * 获取仪表盘统计数据
+   * @returns
+   */
+  @Get('statistics/dashboard')
+  @ApiOperation({ summary: '获取仪表盘统计', description: '获取多维度统计数据：类型分布、月度趋势、Top用户、互动总和、Top笔记' })
+  async getDashboardStats() {
+    try {
+      const stats = await this.xhsService.getDashboardStats();
+      return ResponseDto.success(stats, '获取仪表盘统计成功');
+    } catch (error) {
+      return ResponseDto.error(error.message || '获取仪表盘统计失败');
+    }
+  }
+
 
 
 
@@ -229,17 +244,21 @@ export class XhsController {
   @ApiQuery({ name: 'keyword', required: false, type: String, description: '模糊搜索（同时匹配昵称和标题）' })
   @ApiQuery({ name: 'nickname', required: false, type: String, description: '按用户昵称搜索' })
   @ApiQuery({ name: 'title', required: false, type: String, description: '按笔记标题搜索' })
+  @ApiQuery({ name: 'userId', required: false, type: String, description: '按用户 ID 精确筛选' })
+  @ApiQuery({ name: 'type', required: false, type: String, description: '按笔记类型筛选：normal（图文）| video（视频）' })
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
     @Query('keyword') keyword?: string,
     @Query('nickname') nickname?: string,
     @Query('title') title?: string,
+    @Query('userId') userId?: string,
+    @Query('type') type?: string,
   ) {
     try {
       const pageNum = parseInt(page, 10) || 1;
       const limitNum = parseInt(limit, 10) || 20;
-      const search = keyword || nickname || title ? { keyword, nickname, title } : undefined;
+      const search = keyword || nickname || title || userId || type ? { keyword, nickname, title, userId, type } : undefined;
       const result = await this.xhsService.findAll(pageNum, limitNum, search);
       return ResponseDto.success(result, '获取笔记列表成功');
     } catch (error) {

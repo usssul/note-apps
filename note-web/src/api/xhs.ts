@@ -7,6 +7,8 @@ export function getXhsListApi(params: {
   keyword?: string
   nickname?: string
   title?: string
+  userId?: string
+  type?: string
 } = {}) {
   return request({
     url: '/xhs/list',
@@ -17,6 +19,8 @@ export function getXhsListApi(params: {
       ...(params.keyword && { keyword: params.keyword }),
       ...(params.nickname && { nickname: params.nickname }),
       ...(params.title && { title: params.title }),
+      ...(params.userId && { userId: params.userId }),
+      ...(params.type && { type: params.type }),
     },
   });
 }
@@ -33,6 +37,14 @@ export function getXhsDetailApi(noteId: string) {
 export function getXhsStatisticsApi() {
   return request({
     url: '/xhs/statistics',
+    method: 'get',
+  });
+}
+
+/** 获取仪表盘多维度统计数据 */
+export function getXhsDashboardApi() {
+  return request({
+    url: '/xhs/statistics/dashboard',
     method: 'get',
   });
 }

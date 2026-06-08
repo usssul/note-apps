@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gray-50 font-inter text-gray-800">
+  <div class="min-h-screen bg-gray-50 font-inter text-gray-800 flex flex-col">
     <!-- 顶部导航栏 -->
     <header class="sticky top-0 z-50 bg-white shadow-sm">
       <div class="container mx-auto px-4 py-4">
@@ -18,15 +18,19 @@
     </header>
 
     <!-- 主要内容区 -->
-    <main class="container mx-auto px-4 py-8">
+    <main ref="mainRef" class="container mx-auto px-4 py-8 flex-1">
       <!-- 筛选栏 -->
       <div class="mb-6 flex flex-wrap items-center gap-3">
         <div class="flex flex-wrap gap-2">
           <div v-for="tag in filterTags" :key="tag.value"
-            @click="activeTag = tag.value; clearUserFilter(); clearSearch()"
+            @click="setTypeFilter(tag.value)"
             class="px-4 py-2 rounded-full text-sm cursor-pointer transition-colors select-none"
-            :class="activeTag === tag.value && !activeUserId ? 'bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'">
+            :class="filterType === tag.value && !activeUserId ? 'bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'">
             {{ tag.label }}
+            <span
+              v-if="typeCounts.length"
+              class="ml-1 text-xs opacity-70"
+            >{{ getTypeCount(tag.value) }}</span>
           </div>
         </div>
 
@@ -51,9 +55,9 @@
         <!-- 用户过滤标签 -->
         <div v-if="activeUserId"
           class="flex items-center gap-1 px-3 py-2 bg-blue-50 text-blue-600 rounded-full text-sm">
-          <img v-if="filteredNotes[0]?.userAvatar" :src="filteredNotes[0].userAvatar" class="w-4 h-4 rounded-full" />
+          <img v-if="notes[0]?.userAvatar" :src="notes[0].userAvatar" class="w-4 h-4 rounded-full" />
           <span>{{ activeUserName }}</span>
-          <span class="text-blue-400">· {{ filteredNotes.length }} 篇</span>
+          <span class="text-blue-400">· {{ total }} 篇</span>
           <button @click="clearUserFilter()" class="ml-1 text-blue-400 hover:text-blue-600">
             <i class="fa fa-times-circle"></i>
           </button>
@@ -62,12 +66,14 @@
 
       <!-- Loading 骨架 -->
       <div v-if="loading && notes.length === 0" class="note-waterfall">
-        <div v-for="i in 8" :key="i" class="bg-white rounded-xl overflow-hidden animate-pulse">
-          <div class="aspect-[3/4] bg-gray-200"></div>
-          <div class="p-4 space-y-3">
-            <div class="h-5 bg-gray-200 rounded w-3/4"></div>
-            <div class="h-4 bg-gray-200 rounded w-full"></div>
-            <div class="h-4 bg-gray-200 rounded w-1/2"></div>
+        <div v-for="col in skeletonColumns" :key="col" class="waterfall-col">
+          <div v-for="i in skeletonItemsPerCol" :key="i" class="waterfall-card bg-white rounded-xl overflow-hidden animate-pulse">
+            <div class="aspect-[3/4] bg-gray-200"></div>
+            <div class="p-4 space-y-3">
+              <div class="h-5 bg-gray-200 rounded w-3/4"></div>
+              <div class="h-4 bg-gray-200 rounded w-full"></div>
+              <div class="h-4 bg-gray-200 rounded w-1/2"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -88,8 +94,9 @@
 
       <!-- 笔记瀑布流 -->
       <div v-else class="note-waterfall">
-        <div v-for="note in filteredNotes" :key="note._id"
-          class="bg-white rounded-xl overflow-hidden img-card-shadow hover:shadow-lg transition-all duration-300">
+        <div v-for="(column, colIdx) in masonryColumns" :key="colIdx" class="waterfall-col">
+          <div v-for="note in column" :key="note._id"
+          class="waterfall-card bg-white rounded-xl overflow-hidden img-card-shadow hover:shadow-lg transition-all duration-300 group">
           <!-- 封面图：根据原始宽高自适应比例 -->
           <div class="img-hover-zoom cursor-pointer relative"
             :style="{ aspectRatio: `${note.coverWidth} / ${note.coverHeight}` }" @click="openDetail(note._id)">
@@ -98,15 +105,38 @@
             <div v-else class="w-full h-full bg-gray-100 flex items-center justify-center aspect-[3/4]">
               <i class="fa fa-image text-gray-300 text-5xl"></i>
             </div>
-            <!-- 类型标记 -->
-            <span v-if="note.note?.type === 'video'"
-              class="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
-              <i class="fa fa-play"></i>视频
-            </span>
-            <span v-if="note.hasLivePhoto"
+
+            <!-- 视频笔记覆盖层 -->
+            <template v-if="note.noteType === 'video'">
+              <!-- 居中播放按钮 -->
+              <div class="absolute inset-0 flex items-center justify-center z-10">
+                <div class="w-14 h-14 rounded-full bg-black/55 backdrop-blur-sm flex items-center justify-center
+                  border-2 border-white/70 shadow-lg
+                  transition-all duration-300 group-hover:scale-110 group-hover:bg-black/70
+                  hover:!scale-110 hover:!bg-red-500/80 hover:!border-red-300">
+                  <svg class="w-6 h-6 text-white ml-1" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                </div>
+              </div>
+              <!-- 底部信息栏：时长 + 类型 -->
+              <div class="absolute bottom-2 left-2 right-2 flex items-center justify-between z-10">
+                <span
+                  class="bg-black/55 backdrop-blur-sm text-white text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <svg class="w-3 h-3" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+                  视频
+                </span>
+                <span v-if="note.videoDuration"
+                  class="bg-black/55 backdrop-blur-sm text-white text-xs px-2 py-0.5 rounded-full tabular-nums">
+                  {{ formatDuration(note.videoDuration) }}
+                </span>
+              </div>
+            </template>
+
+            <!-- 动图标记 -->
+            <span v-if="note.hasLivePhoto && note.noteType !== 'video'"
               class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
-              <span class="w-1.5 h-1.5 rounded-full bg-yellow-400 flex-shrink-0"></span><span
-                class="text-xs font-bold live-name">LIVE</span>
+              <span class="text-xs font-bold live-name">动图</span>
             </span>
           </div>
 
@@ -148,6 +178,7 @@
               </div>
             </div>
           </div>
+        </div>
         </div>
       </div>
 
@@ -198,63 +229,106 @@ const filterTags = [
 
 const {
   notes, loading, error, total, currentPage, pageSize, totalPages,
-  searchKeyword,
+  searchKeyword, filterUserId, filterType, typeCounts,
   statsTotal,
   showDetail, currentDetail,
   fetchList, fetchStatistics,
   openDetail, changePage, changePageSize,
 } = useXhsApi()
 
-const activeTag = ref('')
 const activeUserId = ref('')
 const activeUserName = ref('')
 
-// 搜索
+// ---- 瀑布流自适应布局 ----
+const mainRef = ref<HTMLElement>()
+const containerWidth = ref(typeof window !== 'undefined' ? window.innerWidth - 64 : 1200)
+
+const columnCount = computed(() => {
+  const w = containerWidth.value
+  if (w <= 640) return 1
+  if (w <= 768) return 2
+  if (w <= 1200) return 3
+  return 4
+})
+
+/** 将笔记按顺序分配到各列（左→右蛇形，保证视觉顺序） */
+const masonryColumns = computed(() => {
+  const cols = columnCount.value
+  const columns: any[][] = Array.from({ length: cols }, () => [])
+  // 轮询分配：卡片 0,1,2,… 依次放入列 0,1,2,0,1,2,… 保证左→右大致顺序
+  notes.value.forEach((note, i) => {
+    columns[i % cols].push(note)
+  })
+  return columns
+})
+
+/** 骨架屏列数 */
+const skeletonColumns = computed(() => columnCount.value)
+/** 骨架屏每列条数 */
+const skeletonItemsPerCol = computed(() => Math.ceil(8 / Math.max(1, columnCount.value)))
+
+let resizeObserver: ResizeObserver | null = null
+
+// ---- 搜索 ----
 const searchInput = ref('')
-let searchTimer: ReturnType<typeof setTimeout> | null = null
 
 function doSearch() {
   searchKeyword.value = searchInput.value
-  activeTag.value = ''
   activeUserId.value = ''
   activeUserName.value = ''
+  filterUserId.value = ''
+  filterType.value = ''
   currentPage.value = 1
   fetchList(1)
-}
-
-function onSearchInput() {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(doSearch, 400)
 }
 
 function clearSearch() {
   searchInput.value = ''
   searchKeyword.value = ''
+  filterUserId.value = ''
+  filterType.value = ''
   fetchList(1)
 }
 
-// 按类型 + 用户过滤
-const filteredNotes = computed(() => {
-  let result = notes.value
-  if (activeTag.value) {
-    result = result.filter((n: any) => n.note?.type === activeTag.value)
-  }
-  if (activeUserId.value) {
-    result = result.filter((n: any) => n.userId === activeUserId.value)
-  }
-  return result
-})
+// 类型切换 → 服务端筛选
+function setTypeFilter(t: string) {
+  filterType.value = t
+  activeUserId.value = ''
+  activeUserName.value = ''
+  filterUserId.value = ''
+  searchInput.value = ''
+  searchKeyword.value = ''
+  currentPage.value = 1
+  fetchList(1)
+}
 
 function filterByUser(userId: string, userName: string) {
   activeUserId.value = userId
   activeUserName.value = userName
-  activeTag.value = ''
-  clearSearch()
+  searchInput.value = ''
+  searchKeyword.value = ''
+  filterUserId.value = userId
+  filterType.value = ''
+  currentPage.value = 1
+  fetchList(1)
 }
 
 function clearUserFilter() {
   activeUserId.value = ''
   activeUserName.value = ''
+  filterUserId.value = ''
+  fetchList(1)
+}
+
+// 获取指定类型的笔记数量
+function getTypeCount(type: string): string {
+  if (!type) {
+    // 全部 = 所有类型之和
+    const total = typeCounts.value.reduce((sum, t) => sum + t.count, 0)
+    return String(total)
+  }
+  const found = typeCounts.value.find(t => t.type === type)
+  return found ? String(found.count) : '0'
 }
 
 // 格式化互动数（超过1000显示为k）
@@ -276,40 +350,79 @@ function formatTime(ts: number | string): string {
   return d.format('YYYY-MM-DD')
 }
 
+// 格式化视频时长（秒 → mm:ss 或 h:mm:ss）
+function formatDuration(sec: number): string {
+  if (!sec || sec <= 0) return ''
+  const m = Math.floor(sec / 60)
+  const s = Math.floor(sec % 60)
+  if (m >= 60) {
+    const h = Math.floor(m / 60)
+    const rm = m % 60
+    return `${h}:${String(rm).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  }
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 onMounted(() => {
-  fetchList()
+  // 瀑布流容器宽度监听
+  if (mainRef.value) {
+    containerWidth.value = mainRef.value.clientWidth - 32 // px-4 padding
+    resizeObserver = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width
+      if (w && w > 0) containerWidth.value = w
+    })
+    resizeObserver.observe(mainRef.value)
+  }
+
+  // 支持从统计页跳转
+  const route = useRoute()
+  const qUserId = route.query.userId as string
+  const qNickname = route.query.nickname as string
+
+  if (qUserId) {
+    // 走 filterByUser 路径（内部调 clearSearch → fetchList）
+    filterByUser(qUserId, qNickname || qUserId)
+  } else if (qNickname) {
+    searchInput.value = qNickname
+    searchKeyword.value = qNickname
+    fetchList(1)
+  } else {
+    fetchList()
+  }
   fetchStatistics()
+})
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+})
+
+// 翻页后滚动到顶部
+watch(currentPage, () => {
+  nextTick(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  })
 })
 </script>
 
 <style scoped>
-/* 瀑布流布局 */
+/* 瀑布流布局（Flex 列布局，各列独立堆叠，天然形成瀑布流） */
 .note-waterfall {
-  columns: 4;
-  column-gap: 1.5rem;
+  display: flex;
+  gap: 1.5rem;
+  align-items: flex-start;
 }
 
-.note-waterfall>* {
+.waterfall-col {
+  flex: 1;
+  min-width: 0; /* 防止内容溢出 */
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.waterfall-card {
+  /* 卡片宽度由列宽自动决定，高度由内容（封面 aspect-ratio + 文字区）撑开 */
   break-inside: avoid;
-  margin-bottom: 1.5rem;
-}
-
-@media (max-width: 1024px) {
-  .note-waterfall {
-    columns: 3;
-  }
-}
-
-@media (max-width: 768px) {
-  .note-waterfall {
-    columns: 2;
-  }
-}
-
-@media (max-width: 640px) {
-  .note-waterfall {
-    columns: 1;
-  }
 }
 
 .img-card-shadow {

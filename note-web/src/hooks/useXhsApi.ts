@@ -20,6 +20,11 @@ export function useXhsApi() {
 
   // ---- 搜索状态 ----
   const searchKeyword = ref('')
+  const filterUserId = ref('')
+  const filterType = ref('')
+
+  // ---- 类型计数 ----
+  const typeCounts = ref<{ type: string; count: number }[]>([])
 
   // ---- 统计状态 ----
   const statsTotal = ref(0)
@@ -40,6 +45,8 @@ export function useXhsApi() {
         page: page ?? currentPage.value,
         limit: pageSize.value,
         keyword: searchKeyword.value || undefined,
+        userId: filterUserId.value || undefined,
+        type: filterType.value || undefined,
       })
       // ResponseDto 格式: { code: 0, data: { list, total, page, limit, totalPages }, ... }
       const list = res.data?.list ?? []
@@ -54,6 +61,10 @@ export function useXhsApi() {
           coverHeight: firstImg?.height || 300,
           // 是否包含动图
           hasLivePhoto: item.note?.imageList?.some((img: any) => img.livePhoto) || false,
+          // 笔记类型
+          noteType: item.note?.type || 'normal',
+          // 视频时长（秒）
+          videoDuration: item.note?.video?.capa?.duration || item.note?.video?.media?.video?.duration || 0,
           // 用户信息
           userId: item.note?.user?.userId || '',
           userName: item.note?.user?.nickname || '未知',
@@ -61,6 +72,7 @@ export function useXhsApi() {
         }
       })
       total.value = res.data?.total ?? 0
+      if (res.data?.typeCounts) typeCounts.value = res.data.typeCounts
       if (page) currentPage.value = page
     } catch (e: any) {
       error.value = e.message || '加载失败'
@@ -96,6 +108,18 @@ export function useXhsApi() {
     const detail = await fetchDetail(noteId)
     if (detail) {
       // 将 XHS 数据结构映射为 ImageDetailViewer 期望的格式
+      const noteType = detail.note?.type || 'normal'
+      // 视频笔记：提取视频播放地址
+      let mainVideoUrl = ''
+      if (noteType === 'video' && detail.note?.video?.media?.stream) {
+        const stream = detail.note.video.media.stream
+        const h264 = stream.h264?.[0]?.masterUrl
+        const h265 = stream.h265?.[0]?.masterUrl
+        const h266 = stream.h266?.[0]?.masterUrl
+        const av1 = stream.av1?.[0]?.masterUrl
+        mainVideoUrl = toFullUrl(h264 || h265 || h266 || av1 || '')
+      }
+
       currentDetail.value = {
         title: detail.note?.title || '无标题',
         description: detail.note?.desc || '',
@@ -112,10 +136,37 @@ export function useXhsApi() {
             : '',
         })) || [],
         cover: toFullUrl(detail.note?.imageList?.[0]?.urlDefault),
+        noteType,
+        mainVideoUrl,
         tags: detail.note?.tagList?.map((t: any) => t.name) || [],
         likes: detail.note?.interactInfo?.likedCount || 0,
         collects: detail.note?.interactInfo?.collectedCount || 0,
-        views: detail.note?.interactInfo?.viewCount || 0,
+        shares: detail.note?.interactInfo?.shareCount || 0,
+        comments: detail.comments?.list?.map((c: any) => ({
+          id: c.id,
+          content: c.content,
+          nickname: c.userInfo?.nickname || '匿名',
+          avatar: toFullUrl(c.userInfo?.image || c.userInfo?.avatar),
+          likeCount: c.likeCount || '0',
+          createTime: c.createTime
+            ? new Date(c.createTime).toLocaleString('zh-CN')
+            : '',
+          ipLocation: c.ipLocation || '',
+          subComments: (c.subComments || []).map((s: any) => ({
+            id: s.id,
+            content: s.content,
+            nickname: s.userInfo?.nickname || '匿名',
+            avatar: toFullUrl(s.userInfo?.image || s.userInfo?.avatar),
+            likeCount: s.likeCount || '0',
+            createTime: s.createTime
+              ? new Date(s.createTime).toLocaleString('zh-CN')
+              : '',
+            ipLocation: s.ipLocation || '',
+            targetNickname: s.targetComment?.userInfo?.nickname || '',
+          })),
+          subCommentCount: c.subCommentCount || '0',
+        })) || [],
+        commentCount: detail.comments?.list?.length || 0,
       }
       showDetail.value = true
     }
@@ -134,7 +185,7 @@ export function useXhsApi() {
 
   return {
     notes, loading, error, total, currentPage, pageSize, totalPages,
-    searchKeyword,
+    searchKeyword, filterUserId, filterType, typeCounts,
     statsTotal,
     showDetail, currentDetail,
     fetchList, fetchStatistics,

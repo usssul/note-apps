@@ -17,8 +17,9 @@
             class="xhs-viewer-image"
             :class="{ 'is-live-playing': currentIsLivePhoto && !videoEnded }"
           >
-            <!-- 静态图始终可见 -->
+            <!-- 静态图（视频笔记不展示） -->
             <img
+              v-if="!isVideoNote"
               :src="currentImage"
               :alt="imageData.title"
               class="xhs-viewer-img"
@@ -40,6 +41,36 @@
             ></video>
             <!-- Live Photo 标记 -->
             <div v-if="currentIsLivePhoto" class="xhs-viewer-live-badge" title="Live Photo">LIVE</div>
+
+            <!-- 视频笔记播放器 -->
+            <video
+              v-if="isVideoNote"
+              ref="mainVideoRef"
+              :src="imageData.mainVideoUrl"
+              :poster="currentImage"
+              class="xhs-viewer-main-video"
+              controls
+              playsinline
+              @play="mainVideoPlaying = true"
+              @pause="mainVideoPlaying = false"
+              @ended="mainVideoPlaying = false"
+            ></video>
+
+            <!-- 视频笔记：未播放时显示封面 + 播放按钮 -->
+            <div
+              v-if="isVideoNote && !mainVideoPlaying"
+              class="xhs-viewer-video-cover"
+              :style="{ backgroundImage: 'url(' + currentImage + ')' }"
+            >
+              <button class="xhs-viewer-play-btn" @click.stop="playMainVideo">
+                <svg viewBox="0 0 24 24" width="48" height="48" fill="white">
+                  <path d="M8 5v14l11-7z"/>
+                </svg>
+              </button>
+            </div>
+
+            <!-- 视频标记 -->
+            <div v-if="isVideoNote" class="xhs-viewer-live-badge xhs-viewer-video-badge" title="视频笔记">VIDEO</div>
 
             <!-- 上一张 -->
             <button v-if="hasPrevious" class="xhs-viewer-nav xhs-viewer-prev" @click.stop="previousImage">
@@ -154,16 +185,101 @@
             <!-- 统计 -->
             <div class="xhs-viewer-stats">
               <div class="xhs-viewer-stat">
-                <i class="fa fa-eye"></i>
-                <span>{{ formatNumber(imageData.views || 0) }}</span>
-              </div>
-              <div class="xhs-viewer-stat">
                 <i class="fa fa-heart-o"></i>
                 <span>{{ formatNumber(imageData.likes || 0) }}</span>
               </div>
               <div class="xhs-viewer-stat">
                 <i class="fa fa-bookmark-o"></i>
                 <span>{{ formatNumber(imageData.collects || 0) }}</span>
+              </div>
+              <div class="xhs-viewer-stat">
+                <i class="fa fa-share-alt"></i>
+                <span>{{ formatNumber(imageData.shares || 0) }}</span>
+              </div>
+            </div>
+
+            <!-- 评论 -->
+            <div v-if="imageData.comments && imageData.comments.length" class="xhs-viewer-comments">
+              <div class="xhs-viewer-comments-title">
+                评论 ({{ imageData.commentCount || imageData.comments.length }})
+              </div>
+              <div
+                v-for="comment in imageData.comments"
+                :key="comment.id"
+                class="xhs-viewer-comment"
+              >
+                <!-- 主评论 -->
+                <div class="xhs-viewer-comment-main">
+                  <img
+                    v-if="comment.avatar"
+                    :src="comment.avatar"
+                    class="xhs-viewer-comment-avatar"
+                    @error="(e) => { e.target.style.display = 'none' }"
+                  >
+                  <div
+                    v-else
+                    class="xhs-viewer-comment-avatar xhs-viewer-comment-avatar-fallback"
+                  >{{ getInitial(comment.nickname) }}</div>
+                  <div class="xhs-viewer-comment-body">
+                    <div class="xhs-viewer-comment-header">
+                      <span class="xhs-viewer-comment-nick">{{ comment.nickname }}</span>
+                      <span class="xhs-viewer-comment-meta">
+                        <span v-if="comment.ipLocation">{{ comment.ipLocation }}</span>
+                        <span v-if="comment.ipLocation && comment.createTime"> · </span>
+                        <span v-if="comment.createTime">{{ comment.createTime }}</span>
+                      </span>
+                    </div>
+                    <div class="xhs-viewer-comment-content">{{ comment.content }}</div>
+                    <div class="xhs-viewer-comment-footer">
+                      <span class="xhs-viewer-comment-like">
+                        <i class="fa fa-heart-o"></i> {{ formatLikeCount(comment.likeCount) }}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 子评论 -->
+                <div
+                  v-if="comment.subComments && comment.subComments.length"
+                  class="xhs-viewer-subcomments"
+                >
+                  <div
+                    v-for="sub in comment.subComments"
+                    :key="sub.id"
+                    class="xhs-viewer-subcomment"
+                  >
+                    <img
+                      v-if="sub.avatar"
+                      :src="sub.avatar"
+                      class="xhs-viewer-comment-avatar xhs-viewer-subcomment-avatar"
+                      @error="(e) => { e.target.style.display = 'none' }"
+                    >
+                    <div
+                      v-else
+                      class="xhs-viewer-comment-avatar xhs-viewer-subcomment-avatar xhs-viewer-comment-avatar-fallback"
+                    >{{ getInitial(sub.nickname) }}</div>
+                    <div class="xhs-viewer-comment-body">
+                      <div class="xhs-viewer-comment-header">
+                        <span class="xhs-viewer-comment-nick">{{ sub.nickname }}</span>
+                        <span
+                          v-if="sub.targetNickname"
+                          class="xhs-viewer-comment-reply-to"
+                        > 回复 <span class="xhs-viewer-comment-nick">{{ sub.targetNickname }}</span></span>
+                        <span class="xhs-viewer-comment-meta">
+                          <span v-if="sub.ipLocation">{{ sub.ipLocation }}</span>
+                          <span v-if="sub.ipLocation && sub.createTime"> · </span>
+                          <span v-if="sub.createTime">{{ sub.createTime }}</span>
+                        </span>
+                      </div>
+                      <div class="xhs-viewer-comment-content">{{ sub.content }}</div>
+                      <div class="xhs-viewer-comment-footer">
+                        <span class="xhs-viewer-comment-like">
+                          <i class="fa fa-heart-o"></i> {{ formatLikeCount(sub.likeCount) }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -185,7 +301,9 @@ const props = defineProps({
       lyricist_list: [], producer_list: [], youtube_media: {},
       title: '', desc: '', author: '', authorAvatar: '',
       create_date: '', images: [], tags: [],
-      views: 0, likes: 0, collects: 0,
+      views: 0, likes: 0, collects: 0, shares: 0,
+      comments: [], commentCount: 0,
+      noteType: 'normal', mainVideoUrl: '',
     }),
   },
 })
@@ -195,6 +313,10 @@ const emit = defineEmits(['close', 'update:visible'])
 const currentIndex = ref(0)
 const videoRef = ref(null)
 const videoEnded = ref(false)
+const mainVideoRef = ref(null)
+const mainVideoPlaying = ref(false)
+
+const isVideoNote = computed(() => props.imageData.noteType === 'video' && !!props.imageData.mainVideoUrl)
 
 // 归一化：支持字符串数组（旧）和对象数组（新，含 livePhoto / videoUrl）
 function normalizeImage(img) {
@@ -235,10 +357,23 @@ function replayVideo() {
 
 function resetVideo() {
   videoEnded.value = false
+  // 重置主视频状态
+  mainVideoPlaying.value = false
+  if (mainVideoRef.value) {
+    mainVideoRef.value.pause()
+    mainVideoRef.value.currentTime = 0
+  }
+}
+
+function playMainVideo() {
+  if (mainVideoRef.value) {
+    mainVideoRef.value.play()
+  }
 }
 
 function selectThumbnail(idx, event) {
   currentIndex.value = idx
+  resetVideo()
   const el = event.currentTarget
   el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' })
 }
@@ -269,6 +404,13 @@ function getInitial(name) {
 function formatNumber(num) {
   if (num >= 10000) return (num / 10000).toFixed(1) + 'w'
   return String(num)
+}
+
+function formatLikeCount(count) {
+  const n = parseInt(count, 10)
+  if (isNaN(n) || n === 0) return '0'
+  if (n >= 10000) return (n / 10000).toFixed(1) + 'w'
+  return String(n)
 }
 
 function formatCreatorList(list) {
@@ -309,8 +451,6 @@ watch(() => props.visible, (val) => {
 
   /* 重置全局样式干扰 */
   -webkit-tap-highlight-color: transparent;
-  user-select: none;
-  -webkit-user-select: none;
 
   /* 字体独立 */
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -342,6 +482,8 @@ watch(() => props.visible, (val) => {
   flex-direction: column;
   position: relative;
   min-width: 0;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .xhs-viewer-image {
@@ -452,13 +594,115 @@ watch(() => props.visible, (val) => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background-color: #ffd60a;
+  background-color: #ff213a;
   flex-shrink: 0;
 }
 
 /* 视频播放中，徽章淡隐 */
 .xhs-viewer-image.is-live-playing .xhs-viewer-live-badge {
   opacity: 0.2;
+}
+
+/* ====== 视频笔记播放器 ====== */
+.xhs-viewer-main-video {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  border-radius: 4px;
+  z-index: 1;
+  animation: xhs-video-fade-in 0.35s ease;
+}
+@keyframes xhs-video-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* 视频封面 + 播放按钮覆盖层 */
+.xhs-viewer-video-cover {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  cursor: pointer;
+  border-radius: 4px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+  transition: box-shadow 0.3s ease;
+}
+/* hover 时加暗色叠加层（不影响背景图） */
+.xhs-viewer-video-cover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 4px;
+  background: transparent;
+  transition: background 0.3s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+.xhs-viewer-video-cover:hover::after {
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.xhs-viewer-play-btn {
+  position: relative;
+  z-index: 1;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  outline: none;
+  padding: 0;
+}
+.xhs-viewer-play-btn:hover {
+  background: rgba(239, 68, 68, 0.75);
+  border-color: rgba(255, 255, 255, 0.9);
+  transform: scale(1.12);
+  box-shadow: 0 0 32px rgba(239, 68, 68, 0.35);
+}
+.xhs-viewer-play-btn:active {
+  transform: scale(0.92);
+}
+.xhs-viewer-play-btn svg {
+  margin-left: 4px; /* 视觉居中（三角形偏左） */
+  transition: transform 0.25s ease;
+}
+.xhs-viewer-play-btn:hover svg {
+  transform: scale(1.1);
+}
+
+/* 视频标记（渐变紫调区别于 live 红色） */
+.xhs-viewer-video-badge {
+  left: auto;
+  right: 32px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.55), rgba(139, 92, 246, 0.55));
+  gap: 5px;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+.xhs-viewer-video-badge::before {
+  content: '▶';
+  display: inline-block;
+  font-size: 8px;
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+  line-height: 1;
 }
 
 /* livePhoto 播放完毕后，点击图片重新播放 */
@@ -571,7 +815,8 @@ watch(() => props.visible, (val) => {
 /* ====== 详情区域 ====== */
 .xhs-viewer-detail {
   width: 100%;
-  max-height: 55vh;
+  max-height: 65vh;
+  min-height: 35vh;
   background: #fff;
   display: flex;
   flex-direction: column;
@@ -641,7 +886,8 @@ watch(() => props.visible, (val) => {
 .xhs-viewer-detail-body {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  padding: 16px 16px 24px;
+  min-height: 0;
 }
 
 .xhs-viewer-creators {
@@ -703,6 +949,120 @@ watch(() => props.visible, (val) => {
   gap: 5px;
   font-size: 13px;
   color: #777;
+}
+
+/* ====== 评论区域 ====== */
+.xhs-viewer-comments {
+  margin-top: 16px;
+}
+
+.xhs-viewer-comments-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.xhs-viewer-comment {
+  margin-bottom: 16px;
+}
+
+.xhs-viewer-comment-main {
+  display: flex;
+  gap: 10px;
+}
+
+.xhs-viewer-comment-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
+.xhs-viewer-comment-avatar-fallback {
+  background: #e5e7eb;
+  color: #fff;
+  font-weight: bold;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xhs-viewer-comment-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.xhs-viewer-comment-header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.xhs-viewer-comment-nick {
+  font-size: 13px;
+  font-weight: 500;
+  color: #333;
+}
+
+.xhs-viewer-comment-reply-to {
+  font-size: 12px;
+  color: #999;
+}
+
+.xhs-viewer-comment-meta {
+  font-size: 11px;
+  color: #bbb;
+  margin-left: 2px;
+}
+
+.xhs-viewer-comment-content {
+  font-size: 13px;
+  color: #333;
+  line-height: 1.6;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.xhs-viewer-comment-footer {
+  margin-top: 6px;
+}
+
+.xhs-viewer-comment-like {
+  font-size: 11px;
+  color: #bbb;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 子评论 */
+.xhs-viewer-subcomments {
+  margin-top: 10px;
+  margin-left: 42px;
+  padding-left: 12px;
+  border-left: 2px solid #f0f0f0;
+}
+
+.xhs-viewer-subcomment {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.xhs-viewer-subcomment:last-child {
+  margin-bottom: 0;
+}
+
+.xhs-viewer-subcomment-avatar {
+  width: 26px;
+  height: 26px;
 }
 
 /* 滚动条 */

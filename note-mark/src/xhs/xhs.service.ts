@@ -195,16 +195,19 @@ export class XhsService {
   async findAll(
     page: number = 1,
     limit: number = 20,
-    search?: { keyword?: string; nickname?: string; title?: string },
+    search?: { keyword?: string; nickname?: string; title?: string; userId?: string; type?: string },
   ): Promise<{
     list: Xhs[];
     total: number;
     page: number;
     limit: number;
     totalPages: number;
+    typeCounts: { type: string; count: number }[];
   }> {
     const filter: any = {};
-    if (search?.keyword) {
+    if (search?.userId) {
+      filter['note.user.userId'] = search.userId;
+    } else if (search?.keyword) {
       filter.$or = [
         { 'note.user.nickname': { $regex: search.keyword, $options: 'i' } },
         { 'note.title': { $regex: search.keyword, $options: 'i' } },
@@ -218,8 +221,13 @@ export class XhsService {
       }
     }
 
+    // type 过滤可与任意条件组合（AND）
+    if (search?.type) {
+      filter['note.type'] = search.type;
+    }
+
     const skip = (page - 1) * limit;
-    const [list, total] = await Promise.all([
+    const [list, total, typeCounts] = await Promise.all([
       this.xhsModel
         .find(filter)
         .sort({ currentTime: -1 })
@@ -227,6 +235,11 @@ export class XhsService {
         .limit(limit)
         .exec(),
       this.xhsModel.countDocuments(filter).exec(),
+      // 类型分布计数（不受 filter 影响，始终全局）
+      this.xhsModel.aggregate([
+        { $group: { _id: '$note.type', count: { $sum: 1 } } },
+        { $project: { type: '$_id', count: 1, _id: 0 } },
+      ]).exec(),
     ]);
 
     return {
@@ -235,6 +248,7 @@ export class XhsService {
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+      typeCounts,
     };
   }
 
@@ -324,6 +338,258 @@ export class XhsService {
       return total ;
     } catch (error) {
       throw new Error(`获取统计信息失败: ${error.message}`);
+    }
+  }
+
+  async getDashboardStats() {
+    try {
+      const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+      const [
+        totalCount,
+        typeDistribution,
+        monthlyTrend,
+        topCollectedUsers,
+        interactionTotals,
+        topLikedNotes,
+        tagCloud,
+        regionDistribution,
+        recentNotes,
+      ] = await Promise.all([
+        // 总笔记数
+        this.xhsModel.countDocuments({}).exec(),
+
+        // 笔记类型分布 (normal / video)
+        this.xhsModel.aggregate([
+          { $group: { _id: '$note.type', count: { $sum: 1 } } },
+          { $project: { type: '$_id', count: 1, _id: 0 } },
+        ]).exec(),
+
+        // 月度趋势
+        this.xhsModel.aggregate([
+          {
+            $group: {
+              _id: {
+                $dateToString: {
+                  format: '%Y-%m',
+                  date: { $toDate: { $ifNull: ['$note.time', '$currentTime'] } },
+                },
+              },
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { _id: 1 } },
+          { $project: { month: '$_id', count: 1, _id: 0 } },
+        ]).exec(),
+
+        // 收录最多的博主（Top 10，按笔记数排序）
+        this.xhsModel.aggregate([
+          {
+            $group: {
+              _id: '$note.user.userId',
+              nickname: { $first: '$note.user.nickname' },
+              avatar: { $first: '$note.user.avatar' },
+              noteCount: { $sum: 1 },
+            },
+          },
+          { $sort: { noteCount: -1 } },
+          { $limit: 10 },
+          {
+            $project: {
+              userId: '$_id',
+              nickname: 1,
+              avatar: 1,
+              noteCount: 1,
+              _id: 0,
+            },
+          },
+        ]).exec(),
+
+        // 互动总和（处理 "1.1万" 格式）
+        this.xhsModel.aggregate([
+          {
+            $addFields: {
+              _rawLiked: {
+                $cond: { if: { $in: [{ $ifNull: ['$note.interactInfo.likedCount', ''] }, ['', null]] }, then: '0', else: '$note.interactInfo.likedCount' },
+              },
+              _rawCollected: {
+                $cond: { if: { $in: [{ $ifNull: ['$note.interactInfo.collectedCount', ''] }, ['', null]] }, then: '0', else: '$note.interactInfo.collectedCount' },
+              },
+              _rawComment: {
+                $cond: { if: { $in: [{ $ifNull: ['$note.interactInfo.commentCount', ''] }, ['', null]] }, then: '0', else: '$note.interactInfo.commentCount' },
+              },
+              _rawShare: {
+                $cond: { if: { $in: [{ $ifNull: ['$note.interactInfo.shareCount', ''] }, ['', null]] }, then: '0', else: '$note.interactInfo.shareCount' },
+              },
+            },
+          },
+          {
+            $addFields: {
+              likedNum: {
+                $cond: {
+                  if: { $regexMatch: { input: '$_rawLiked', regex: '万' } },
+                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } } }, 10000] },
+                  else: { $toDouble: '$_rawLiked' },
+                },
+              },
+              collectedNum: {
+                $cond: {
+                  if: { $regexMatch: { input: '$_rawCollected', regex: '万' } },
+                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawCollected', find: '万', replacement: '' } } }, 10000] },
+                  else: { $toDouble: '$_rawCollected' },
+                },
+              },
+              commentNum: {
+                $cond: {
+                  if: { $regexMatch: { input: '$_rawComment', regex: '万' } },
+                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawComment', find: '万', replacement: '' } } }, 10000] },
+                  else: { $toDouble: '$_rawComment' },
+                },
+              },
+              shareNum: {
+                $cond: {
+                  if: { $regexMatch: { input: '$_rawShare', regex: '万' } },
+                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawShare', find: '万', replacement: '' } } }, 10000] },
+                  else: { $toDouble: '$_rawShare' },
+                },
+              },
+            },
+          },
+          {
+            $group: {
+              _id: null,
+              totalLikes: { $sum: '$likedNum' },
+              totalCollects: { $sum: '$collectedNum' },
+              totalComments: { $sum: '$commentNum' },
+              totalShares: { $sum: '$shareNum' },
+            },
+          },
+          { $project: { _id: 0 } },
+        ]).exec(),
+
+        // Top 10 点赞笔记（aggregation 转数值排序，likedCount 是字符串如 "934"、"1.1万"、空串）
+        this.xhsModel.aggregate([
+          {
+            $addFields: {
+              // 空字符串和 null 统一视为 '0'
+              _rawLiked: {
+                $cond: {
+                  if: { $in: [{ $ifNull: ['$note.interactInfo.likedCount', ''] }, ['', null]] },
+                  then: '0',
+                  else: '$note.interactInfo.likedCount',
+                },
+              },
+            },
+          },
+          {
+            $addFields: {
+              likedCountNum: {
+                $cond: {
+                  if: { $regexMatch: { input: '$_rawLiked', regex: '万' } },
+                  then: {
+                    $multiply: [
+                      { $toDouble: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } } },
+                      10000,
+                    ],
+                  },
+                  else: { $toDouble: '$_rawLiked' },
+                },
+              },
+            },
+          },
+          { $sort: { likedCountNum: -1 } },
+          { $limit: 10 },
+          {
+            $project: {
+              'note.noteId': 1,
+              'note.title': 1,
+              'note.type': 1,
+              'note.user.userId': 1,
+              'note.user.nickname': 1,
+              'note.user.avatar': 1,
+              'note.imageList.urlDefault': 1,
+              'note.interactInfo.likedCount': 1,
+              'note.interactInfo.collectedCount': 1,
+              'note.time': 1,
+            },
+          },
+        ]).exec(),
+
+        // 热门标签云（前 50）
+        this.xhsModel.aggregate([
+          { $unwind: { path: '$note.tagList', preserveNullAndEmptyArrays: false } },
+          {
+            $group: {
+              _id: '$note.tagList.name',
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+          { $limit: 50 },
+          { $project: { name: '$_id', count: 1, _id: 0 } },
+        ]).exec(),
+
+        // 地区分布
+        this.xhsModel.aggregate([
+          {
+            $match: {
+              'note.ipLocation': { $nin: [null, ''] },
+            },
+          },
+          {
+            $group: {
+              _id: '$note.ipLocation',
+              count: { $sum: 1 },
+            },
+          },
+          { $sort: { count: -1 } },
+          { $limit: 20 },
+          { $project: { region: '$_id', count: 1, _id: 0 } },
+        ]).exec(),
+
+        // 最近 7 天收录
+        this.xhsModel.find(
+          { currentTime: { $gte: sevenDaysAgo } },
+          {
+            'note.noteId': 1,
+            'note.title': 1,
+            'note.type': 1,
+            'note.user.userId': 1,
+            'note.user.nickname': 1,
+            'note.user.avatar': 1,
+            'note.imageList.urlDefault': 1,
+            'note.interactInfo.likedCount': 1,
+            currentTime: 1,
+          },
+        )
+          .sort({ currentTime: -1 })
+          .limit(20)
+          .lean()
+          .exec(),
+      ]);
+
+      // 统计总用户数（去重）
+      const uniqueUsers = await this.xhsModel.distinct('note.user.userId').exec();
+
+      return {
+        totalCount,
+        uniqueUserCount: uniqueUsers.length,
+        typeDistribution,
+        monthlyTrend,
+        topCollectedUsers,
+        interactionTotals: interactionTotals[0] || {
+          totalLikes: 0,
+          totalCollects: 0,
+          totalComments: 0,
+          totalShares: 0,
+        },
+        topLikedNotes,
+        tagCloud,
+        regionDistribution,
+        recentNotes,
+      };
+    } catch (error) {
+      throw new Error(`获取仪表盘统计失败: ${error.message}`);
     }
   }
 }
