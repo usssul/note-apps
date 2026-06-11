@@ -195,7 +195,7 @@ export class XhsService {
   async findAll(
     page: number = 1,
     limit: number = 20,
-    search?: { keyword?: string; nickname?: string; title?: string; userId?: string; type?: string },
+    search?: { keyword?: string; nickname?: string; title?: string; userId?: string; type?: string; isFavorited?: boolean },
   ): Promise<{
     list: Xhs[];
     total: number;
@@ -203,6 +203,7 @@ export class XhsService {
     limit: number;
     totalPages: number;
     typeCounts: { type: string; count: number }[];
+    favoritedCount: number;
   }> {
     const filter: any = {};
     if (search?.userId) {
@@ -226,8 +227,13 @@ export class XhsService {
       filter['note.type'] = search.type;
     }
 
+    // 收藏过滤
+    if (search?.isFavorited !== undefined) {
+      filter.isFavorited = search.isFavorited;
+    }
+
     const skip = (page - 1) * limit;
-    const [list, total, typeCounts] = await Promise.all([
+    const [list, total, typeCounts, favoritedCount] = await Promise.all([
       this.xhsModel
         .find(filter)
         .sort({ currentTime: -1 })
@@ -240,6 +246,8 @@ export class XhsService {
         { $group: { _id: '$note.type', count: { $sum: 1 } } },
         { $project: { type: '$_id', count: 1, _id: 0 } },
       ]).exec(),
+      // 收藏总数（全局）
+      this.xhsModel.countDocuments({ isFavorited: true }).exec(),
     ]);
 
     return {
@@ -249,6 +257,7 @@ export class XhsService {
       limit,
       totalPages: Math.ceil(total / limit),
       typeCounts,
+      favoritedCount,
     };
   }
 
@@ -332,6 +341,33 @@ export class XhsService {
     return count > 0;
   }
 
+  /**
+   * 切换收藏状态
+   * @returns 更新后的文档
+   */
+  async toggleFavorite(noteId: string): Promise<Xhs> {
+    const note = await this.xhsModel.findById(noteId).exec();
+    if (!note) {
+      throw new NotFoundException(`笔记不存在: ${noteId}`);
+    }
+
+    const newState = !note.isFavorited;
+    const updated = await this.xhsModel
+      .findByIdAndUpdate(
+        noteId,
+        {
+          $set: {
+            isFavorited: newState,
+            favoritedAt: newState ? new Date() : null,
+          },
+        },
+        { new: true },
+      )
+      .exec();
+
+    return updated;
+  }
+
   async getStatistics(): Promise< number > {
     try {
       const total = await this.xhsModel.countDocuments({}).exec();
@@ -405,7 +441,7 @@ export class XhsService {
           },
         ]).exec(),
 
-        // 互动总和（处理 "1.1万" 格式）
+        // 互动总和（处理 "1.1万"、"10+" 等非标格式）
         this.xhsModel.aggregate([
           {
             $addFields: {
@@ -425,33 +461,41 @@ export class XhsService {
           },
           {
             $addFields: {
+              _cleanLiked: {
+                $cond: { if: { $regexMatch: { input: '$_rawLiked', regex: '万' } }, then: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } }, else: '$_rawLiked' },
+              },
+              _cleanCollected: {
+                $cond: { if: { $regexMatch: { input: '$_rawCollected', regex: '万' } }, then: { $replaceAll: { input: '$_rawCollected', find: '万', replacement: '' } }, else: '$_rawCollected' },
+              },
+              _cleanComment: {
+                $cond: { if: { $regexMatch: { input: '$_rawComment', regex: '万' } }, then: { $replaceAll: { input: '$_rawComment', find: '万', replacement: '' } }, else: '$_rawComment' },
+              },
+              _cleanShare: {
+                $cond: { if: { $regexMatch: { input: '$_rawShare', regex: '万' } }, then: { $replaceAll: { input: '$_rawShare', find: '万', replacement: '' } }, else: '$_rawShare' },
+              },
+            },
+          },
+          {
+            $addFields: {
+              _numLiked: { $convert: { input: '$_cleanLiked', to: 'double', onError: 0, onNull: 0 } },
+              _numCollected: { $convert: { input: '$_cleanCollected', to: 'double', onError: 0, onNull: 0 } },
+              _numComment: { $convert: { input: '$_cleanComment', to: 'double', onError: 0, onNull: 0 } },
+              _numShare: { $convert: { input: '$_cleanShare', to: 'double', onError: 0, onNull: 0 } },
+            },
+          },
+          {
+            $addFields: {
               likedNum: {
-                $cond: {
-                  if: { $regexMatch: { input: '$_rawLiked', regex: '万' } },
-                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } } }, 10000] },
-                  else: { $toDouble: '$_rawLiked' },
-                },
+                $cond: { if: { $regexMatch: { input: '$_rawLiked', regex: '万' } }, then: { $multiply: ['$_numLiked', 10000] }, else: '$_numLiked' },
               },
               collectedNum: {
-                $cond: {
-                  if: { $regexMatch: { input: '$_rawCollected', regex: '万' } },
-                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawCollected', find: '万', replacement: '' } } }, 10000] },
-                  else: { $toDouble: '$_rawCollected' },
-                },
+                $cond: { if: { $regexMatch: { input: '$_rawCollected', regex: '万' } }, then: { $multiply: ['$_numCollected', 10000] }, else: '$_numCollected' },
               },
               commentNum: {
-                $cond: {
-                  if: { $regexMatch: { input: '$_rawComment', regex: '万' } },
-                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawComment', find: '万', replacement: '' } } }, 10000] },
-                  else: { $toDouble: '$_rawComment' },
-                },
+                $cond: { if: { $regexMatch: { input: '$_rawComment', regex: '万' } }, then: { $multiply: ['$_numComment', 10000] }, else: '$_numComment' },
               },
               shareNum: {
-                $cond: {
-                  if: { $regexMatch: { input: '$_rawShare', regex: '万' } },
-                  then: { $multiply: [{ $toDouble: { $replaceAll: { input: '$_rawShare', find: '万', replacement: '' } } }, 10000] },
-                  else: { $toDouble: '$_rawShare' },
-                },
+                $cond: { if: { $regexMatch: { input: '$_rawShare', regex: '万' } }, then: { $multiply: ['$_numShare', 10000] }, else: '$_numShare' },
               },
             },
           },
@@ -483,17 +527,20 @@ export class XhsService {
           },
           {
             $addFields: {
+              _cleanLiked: {
+                $cond: { if: { $regexMatch: { input: '$_rawLiked', regex: '万' } }, then: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } }, else: '$_rawLiked' },
+              },
+            },
+          },
+          {
+            $addFields: {
+              _numLiked: { $convert: { input: '$_cleanLiked', to: 'double', onError: 0, onNull: 0 } },
+            },
+          },
+          {
+            $addFields: {
               likedCountNum: {
-                $cond: {
-                  if: { $regexMatch: { input: '$_rawLiked', regex: '万' } },
-                  then: {
-                    $multiply: [
-                      { $toDouble: { $replaceAll: { input: '$_rawLiked', find: '万', replacement: '' } } },
-                      10000,
-                    ],
-                  },
-                  else: { $toDouble: '$_rawLiked' },
-                },
+                $cond: { if: { $regexMatch: { input: '$_rawLiked', regex: '万' } }, then: { $multiply: ['$_numLiked', 10000] }, else: '$_numLiked' },
               },
             },
           },
@@ -563,7 +610,7 @@ export class XhsService {
           },
         )
           .sort({ currentTime: -1 })
-          .limit(20)
+          .limit(10)
           .lean()
           .exec(),
       ]);

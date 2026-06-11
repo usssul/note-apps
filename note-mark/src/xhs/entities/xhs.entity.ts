@@ -248,6 +248,13 @@ export class Xhs extends Document {
   @Prop()
   currentTime: number;
 
+  // 本地收藏标记
+  @Prop({ default: false })
+  isFavorited: boolean;
+
+  @Prop()
+  favoritedAt: Date;
+
   // 记录原始数据备份（可选）
   @Prop({ type: Object })
   originalData?: any;

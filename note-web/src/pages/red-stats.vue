@@ -244,6 +244,13 @@
                 {{ formatDate(row.currentTime) }}
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="70" fixed="right">
+              <template #default="{ row }">
+                <el-button type="danger" size="small" text @click="handleDelete(row._id)">
+                  <i class="fa fa-trash"></i>
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
           <div v-else class="text-center text-gray-400 py-8">最近 7 天暂无新收录</div>
         </div>
@@ -316,13 +323,27 @@
                 <span class="text-gray-500 text-sm">{{ formatTime(row.note?.time) }}</span>
               </template>
             </el-table-column>
+            <el-table-column label="操作" width="70" fixed="right">
+              <template #default="{ row }">
+                <el-button type="danger" size="small" text @click="handleDelete(row._id)">
+                  <i class="fa fa-trash"></i>
+                </el-button>
+              </template>
+            </el-table-column>
           </el-table>
         </div>
       </template>
     </main>
 
     <!-- 笔记详情独立弹窗 -->
-    <ImageDetailViewer v-model:visible="showDetail" :image-data="currentDetail" />
+    <ImageDetailViewer
+      v-model:visible="showDetail"
+      :image-data="currentDetail"
+      :note-id="currentDetail._id || ''"
+      :is-favorited="currentDetail.isFavorited || false"
+      @toggle-favorite="toggleFavorite"
+      @delete="handleDelete"
+    />
   </div>
 </template>
 
@@ -364,12 +385,32 @@ function toThumb(path: string | undefined): string {
 
 const router = useRouter()
 const { statsData, loading, error, fetchDashboard } = useXhsStats()
-const { showDetail, currentDetail, openDetail } = useXhsApi()
+const { showDetail, currentDetail, openDetail, toggleFavorite, deleteNote } = useXhsApi()
 
 // ---- 导航 ----
 function goToNote(noteId: string) {
   if (!noteId) return
   openDetail(noteId)
+}
+
+async function handleDelete(noteId: string) {
+  try {
+    await ElMessageBox.confirm('确定要删除这篇笔记吗？此操作不可撤销。', '确认删除', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+      zIndex: 10000,
+    })
+  } catch {
+    return
+  }
+  const ok = await deleteNote(noteId)
+  if (ok) {
+    ElMessage.success('笔记已删除')
+    // 刷新仪表盘数据
+    fetchDashboard()
+  }
 }
 
 function goToBlogger(userId: string, nickname?: string) {

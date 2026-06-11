@@ -43,34 +43,86 @@
             <div v-if="currentIsLivePhoto" class="xhs-viewer-live-badge" title="Live Photo">LIVE</div>
 
             <!-- 视频笔记播放器 -->
-            <video
-              v-if="isVideoNote"
-              ref="mainVideoRef"
-              :src="imageData.mainVideoUrl"
-              :poster="currentImage"
-              class="xhs-viewer-main-video"
-              controls
-              playsinline
-              @play="mainVideoPlaying = true"
-              @pause="mainVideoPlaying = false"
-              @ended="mainVideoPlaying = false"
-            ></video>
+            <div v-if="isVideoNote" class="xhs-viewer-video-wrapper" @mousemove="wakeControls">
+              <video
+                ref="mainVideoRef"
+                :src="imageData.mainVideoUrl"
+                :poster="currentImage"
+                class="xhs-viewer-main-video"
+                playsinline
+                @play="onVideoPlay"
+                @pause="onVideoPause"
+                @ended="onVideoEnded"
+                @timeupdate="onVideoTimeUpdate"
+                @loadedmetadata="onVideoLoaded"
+                @progress="onVideoProgress"
+                @waiting="videoLoading = true"
+                @canplay="videoLoading = false"
+              ></video>
 
-            <!-- 视频笔记：未播放时显示封面 + 播放按钮 -->
-            <div
-              v-if="isVideoNote && !mainVideoPlaying"
-              class="xhs-viewer-video-cover"
-              :style="{ backgroundImage: 'url(' + currentImage + ')' }"
-            >
-              <button class="xhs-viewer-play-btn" @click.stop="playMainVideo">
-                <svg viewBox="0 0 24 24" width="48" height="48" fill="white">
-                  <path d="M8 5v14l11-7z"/>
+              <!-- 加载旋转 -->
+              <div v-if="videoLoading" class="xhs-viewer-video-spinner">
+                <svg viewBox="0 0 50 50" width="44" height="44">
+                  <circle cx="25" cy="25" r="20" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="3"/>
+                  <circle cx="25" cy="25" r="20" fill="none" stroke="#fff" stroke-width="3" stroke-dasharray="31.4 94.2" stroke-linecap="round">
+                    <animateTransform attributeName="transform" type="rotate" from="0 25 25" to="360 25 25" dur="0.8s" repeatCount="indefinite"/>
+                  </circle>
                 </svg>
-              </button>
-            </div>
+              </div>
 
-            <!-- 视频标记 -->
-            <div v-if="isVideoNote" class="xhs-viewer-live-badge xhs-viewer-video-badge" title="视频笔记">VIDEO</div>
+              <!-- 封面 + 大播放按钮（未播放时） -->
+              <div v-if="!videoStarted" class="xhs-viewer-video-cover" @click.stop="playMainVideo">
+                <img :src="currentImage" class="xhs-viewer-video-cover-img" alt="" />
+                <button class="xhs-viewer-play-btn" @click.stop="playMainVideo">
+                  <span class="xhs-viewer-play-ring"></span>
+                  <svg viewBox="0 0 24 24" width="26" height="26" fill="white">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                </button>
+              </div>
+
+              <!-- 自定义控制栏 -->
+              <div
+                v-if="videoStarted"
+                class="xhs-viewer-video-controls"
+                :class="{ 'is-idle': controlsIdle }"
+                @mouseenter="wakeControls"
+                @mouseleave="idleControls"
+                @touchstart="wakeControls"
+              >
+                <button class="xhs-viewer-ctrl-btn" @click.stop="toggleVideoPlay">
+                  <svg v-if="mainVideoPlaying" viewBox="0 0 24 24" width="18" height="18" fill="white"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>
+                  <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M8 5v14l11-7z"/></svg>
+                </button>
+                <span class="xhs-viewer-ctrl-time">{{ formatVideoTime(videoCurrentTime) }}</span>
+                <div
+                  class="xhs-viewer-ctrl-progress"
+                  :class="{ 'is-dragging': isDragging }"
+                  @mousedown.stop="startDrag"
+                  @mousemove="onProgressHover"
+                  @mouseleave="onProgressLeave"
+                >
+                  <div class="xhs-viewer-ctrl-track">
+                    <div class="xhs-viewer-ctrl-buffered" :style="{ width: videoBufferedPercent + '%' }"></div>
+                    <div class="xhs-viewer-ctrl-filled" :style="{ width: videoProgress + '%' }"></div>
+                    <div class="xhs-viewer-ctrl-thumb" :style="{ left: videoProgress + '%' }"></div>
+                  </div>
+                  <div
+                    v-if="hoverPreviewVisible"
+                    class="xhs-viewer-ctrl-preview"
+                    :style="{ left: hoverPreviewPos + '%' }"
+                  >{{ formatVideoTime(hoverPreviewTime) }}</div>
+                </div>
+                <span class="xhs-viewer-ctrl-time xhs-viewer-ctrl-duration">{{ formatVideoTime(videoDuration) }}</span>
+                <button class="xhs-viewer-ctrl-btn" @click.stop="toggleVideoMute">
+                  <svg v-if="videoMuted" viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+                  <svg v-else viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+                </button>
+              </div>
+
+              <!-- 视频标记 -->
+              <div class="xhs-viewer-live-badge xhs-viewer-video-badge" title="视频笔记">VIDEO</div>
+            </div>
 
             <!-- 上一张 -->
             <button v-if="hasPrevious" class="xhs-viewer-nav xhs-viewer-prev" @click.stop="previousImage">
@@ -133,9 +185,39 @@
                 {{ getInitial(imageData.author || '用户') }}
               </div>
               <div class="xhs-viewer-author-info">
-                <div class="xhs-viewer-author-name">{{ imageData.author || '匿名用户' }}</div>
+                <a
+                  class="xhs-viewer-author-name"
+                  :href="authorSearchUrl"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  :title="`在小红书搜索 ${imageData.author}`"
+                >{{ imageData.author || '匿名用户' }}</a>
                 <div class="xhs-viewer-author-date">{{ imageData.create_date }}</div>
               </div>
+              <!-- 收藏按钮 -->
+              <button
+                v-if="noteId"
+                @click.stop="$emit('toggleFavorite', noteId)"
+                class="xhs-viewer-fav-btn"
+                :class="{ 'is-favorited': isFavorited }"
+                :title="isFavorited ? '取消收藏' : '收藏'"
+              >
+                <svg viewBox="0 0 24 24" :fill="isFavorited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+                  <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+                </svg>
+              </button>
+              <!-- 删除按钮 -->
+              <button
+                v-if="noteId"
+                @click.stop="$emit('delete', noteId)"
+                class="xhs-viewer-del-btn"
+                title="删除笔记"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
             </div>
             <h2
               v-if="imageData.title && imageData.title !== '无标题'"
@@ -293,13 +375,15 @@ import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   visible: { type: Boolean, default: false },
+  noteId: { type: String, default: '' },
+  isFavorited: { type: Boolean, default: false },
   imageData: {
     type: Object,
     default: () => ({
       cover: '', id: '', name: '', description: '',
       singer_list: [], composer_list: [], arranger_list: [],
       lyricist_list: [], producer_list: [], youtube_media: {},
-      title: '', desc: '', author: '', authorAvatar: '',
+      title: '', desc: '', author: '', userId: '', authorAvatar: '',
       create_date: '', images: [], tags: [],
       views: 0, likes: 0, collects: 0, shares: 0,
       comments: [], commentCount: 0,
@@ -308,13 +392,30 @@ const props = defineProps({
   },
 })
 
-const emit = defineEmits(['close', 'update:visible'])
+const emit = defineEmits(['close', 'update:visible', 'toggleFavorite', 'delete'])
 
 const currentIndex = ref(0)
 const videoRef = ref(null)
 const videoEnded = ref(false)
 const mainVideoRef = ref(null)
 const mainVideoPlaying = ref(false)
+const videoStarted = ref(false)
+const videoLoading = ref(false)
+const videoCurrentTime = ref(0)
+const videoDuration = ref(0)
+const videoBuffered = ref(0)
+const videoMuted = ref(false)
+const controlsIdle = ref(false)
+let controlsTimer = null
+
+const videoProgress = computed(() => {
+  if (!videoDuration.value) return 0
+  return (videoCurrentTime.value / videoDuration.value) * 100
+})
+const videoBufferedPercent = computed(() => {
+  if (!videoDuration.value) return 0
+  return (videoBuffered.value / videoDuration.value) * 100
+})
 
 const isVideoNote = computed(() => props.imageData.noteType === 'video' && !!props.imageData.mainVideoUrl)
 
@@ -337,6 +438,11 @@ const currentVideoUrl = computed(() => images.value[currentIndex.value]?.videoUr
 const hasPrevious = computed(() => currentIndex.value > 0)
 const hasNext = computed(() => currentIndex.value < images.value.length - 1)
 
+const authorSearchUrl = computed(() => {
+  const keyword = props.imageData.userId || props.imageData.author || ''
+  return `https://www.xiaohongshu.com/search_result_ai?keyword=${encodeURIComponent(keyword)}&source=web_explore_feed`
+})
+
 const hasCreatorInfo = computed(() => {
   return props.imageData.composer_list
     || props.imageData.lyricist_list
@@ -355,10 +461,32 @@ function replayVideo() {
   }
 }
 
+// ---- 视频事件 ----
+function onVideoPlay() { mainVideoPlaying.value = true; videoStarted.value = true }
+function onVideoPause() { mainVideoPlaying.value = false }
+function onVideoEnded() { mainVideoPlaying.value = false; videoStarted.value = false; videoCurrentTime.value = 0 }
+function onVideoTimeUpdate() {
+  if (mainVideoRef.value) videoCurrentTime.value = mainVideoRef.value.currentTime
+}
+function onVideoLoaded() {
+  if (mainVideoRef.value) videoDuration.value = mainVideoRef.value.duration || 0
+}
+function onVideoProgress() {
+  if (mainVideoRef.value && mainVideoRef.value.buffered.length) {
+    videoBuffered.value = mainVideoRef.value.buffered.end(mainVideoRef.value.buffered.length - 1)
+  }
+}
+
 function resetVideo() {
   videoEnded.value = false
-  // 重置主视频状态
   mainVideoPlaying.value = false
+  videoStarted.value = false
+  videoLoading.value = false
+  videoCurrentTime.value = 0
+  videoDuration.value = 0
+  videoBuffered.value = 0
+  hoverPreviewVisible.value = false
+  if (isDragging.value) stopDrag()
   if (mainVideoRef.value) {
     mainVideoRef.value.pause()
     mainVideoRef.value.currentTime = 0
@@ -366,9 +494,94 @@ function resetVideo() {
 }
 
 function playMainVideo() {
-  if (mainVideoRef.value) {
-    mainVideoRef.value.play()
+  if (mainVideoRef.value) mainVideoRef.value.play()
+}
+
+function toggleVideoPlay() {
+  if (!mainVideoRef.value) return
+  mainVideoPlaying.value ? mainVideoRef.value.pause() : mainVideoRef.value.play()
+}
+
+// ---- 进度条拖拽 & 悬停 ----
+const isDragging = ref(false)
+const hoverPreviewVisible = ref(false)
+const hoverPreviewPos = ref(0)
+const hoverPreviewTime = ref(0)
+
+function getSeekRatio(e) {
+  // 优先从 currentTarget（进度条自身事件），否则从全局查找（拖拽时的事件）
+  const track = e.currentTarget?.querySelector?.('.xhs-viewer-ctrl-track')
+    || document.querySelector('.xhs-viewer-video-controls .xhs-viewer-ctrl-track')
+  if (!track) return null
+  const rect = track.getBoundingClientRect()
+  return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
+}
+
+function applySeek(e) {
+  const ratio = getSeekRatio(e)
+  if (ratio === null || !mainVideoRef.value || !videoDuration.value) return
+  mainVideoRef.value.currentTime = ratio * videoDuration.value
+}
+
+function startDrag(e) {
+  e.preventDefault()
+  isDragging.value = true
+  applySeek(e)
+  document.addEventListener('mousemove', onDrag)
+  document.addEventListener('mouseup', stopDrag)
+}
+
+function onDrag(e) {
+  if (!isDragging.value) return
+  applySeek(e)
+  updateHover(e)
+}
+
+function stopDrag() {
+  isDragging.value = false
+  document.removeEventListener('mousemove', onDrag)
+  document.removeEventListener('mouseup', stopDrag)
+}
+
+function onProgressHover(e) {
+  if (isDragging.value) return
+  updateHover(e)
+}
+
+function updateHover(e) {
+  const ratio = getSeekRatio(e)
+  if (ratio === null) return
+  hoverPreviewPos.value = ratio * 100
+  hoverPreviewTime.value = ratio * videoDuration.value
+  hoverPreviewVisible.value = true
+}
+
+function onProgressLeave() {
+  if (!isDragging.value) {
+    hoverPreviewVisible.value = false
   }
+}
+
+function toggleVideoMute() {
+  if (!mainVideoRef.value) return
+  mainVideoRef.value.muted = !mainVideoRef.value.muted
+  videoMuted.value = mainVideoRef.value.muted
+}
+
+function formatVideoTime(secs) {
+  if (!secs || !isFinite(secs)) return '0:00'
+  const m = Math.floor(secs / 60)
+  const s = Math.floor(secs % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+function wakeControls() {
+  controlsIdle.value = false
+  if (controlsTimer) clearTimeout(controlsTimer)
+  controlsTimer = setTimeout(() => { controlsIdle.value = true }, 2500)
+}
+function idleControls() {
+  controlsTimer = setTimeout(() => { controlsIdle.value = true }, 3000)
 }
 
 function selectThumbnail(idx, event) {
@@ -391,6 +604,8 @@ function onThumbnailsWheel(event) {
 }
 
 function closeViewer() {
+  if (controlsTimer) { clearTimeout(controlsTimer); controlsTimer = null }
+  if (isDragging.value) stopDrag()
   emit('update:visible', false)
   emit('close')
   currentIndex.value = 0
@@ -430,6 +645,8 @@ watch(() => props.visible, (val) => {
     document.addEventListener('keydown', handleKeydown)
     document.body.style.overflow = 'hidden'
   } else {
+    if (controlsTimer) { clearTimeout(controlsTimer); controlsTimer = null }
+    if (isDragging.value) stopDrag()
     document.removeEventListener('keydown', handleKeydown)
     document.body.style.overflow = ''
   }
@@ -604,15 +821,17 @@ watch(() => props.visible, (val) => {
 }
 
 /* ====== 视频笔记播放器 ====== */
-.xhs-viewer-main-video {
+.xhs-viewer-video-wrapper {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+  z-index: 1;
+}
+
+.xhs-viewer-main-video {
   width: 100%;
   height: 100%;
   object-fit: contain;
   border-radius: 4px;
-  z-index: 1;
   animation: xhs-video-fade-in 0.35s ease;
 }
 @keyframes xhs-video-fade-in {
@@ -620,7 +839,18 @@ watch(() => props.visible, (val) => {
   to { opacity: 1; }
 }
 
-/* 视频封面 + 播放按钮覆盖层 */
+/* 加载旋转 */
+.xhs-viewer-video-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 5;
+  pointer-events: none;
+}
+
+/* 封面 + 大播放按钮 */
 .xhs-viewer-video-cover {
   position: absolute;
   inset: 0;
@@ -630,59 +860,216 @@ watch(() => props.visible, (val) => {
   z-index: 2;
   cursor: pointer;
   border-radius: 4px;
-  background-size: contain;
-  background-repeat: no-repeat;
-  background-position: center;
-  transition: box-shadow 0.3s ease;
+  overflow: hidden;
 }
-/* hover 时加暗色叠加层（不影响背景图） */
+.xhs-viewer-video-cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+/* 封面暗色叠加层 */
 .xhs-viewer-video-cover::after {
   content: '';
   position: absolute;
   inset: 0;
-  border-radius: 4px;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.08);
   transition: background 0.3s ease;
   pointer-events: none;
   z-index: 0;
 }
 .xhs-viewer-video-cover:hover::after {
-  background: rgba(0, 0, 0, 0.18);
+  background: rgba(0, 0, 0, 0.22);
 }
 
 .xhs-viewer-play-btn {
   position: relative;
   z-index: 1;
-  width: 72px;
-  height: 72px;
+  width: 80px;
+  height: 80px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  border: 2px solid rgba(255, 255, 255, 0.6);
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.25s cubic-bezier(0.25, 1, 0.5, 1);
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), background 0.3s ease;
   outline: none;
   padding: 0;
 }
-.xhs-viewer-play-btn:hover {
-  background: rgba(239, 68, 68, 0.75);
-  border-color: rgba(255, 255, 255, 0.9);
-  transform: scale(1.12);
-  box-shadow: 0 0 32px rgba(239, 68, 68, 0.35);
-}
-.xhs-viewer-play-btn:active {
-  transform: scale(0.92);
-}
 .xhs-viewer-play-btn svg {
-  margin-left: 4px; /* 视觉居中（三角形偏左） */
-  transition: transform 0.25s ease;
+  margin-left: 3px;
+  filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+  transition: transform 0.3s ease;
 }
-.xhs-viewer-play-btn:hover svg {
-  transform: scale(1.1);
+/* 脉冲光环 */
+.xhs-viewer-play-ring {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.35);
+  animation: xhs-play-pulse 2s ease-out infinite;
+  pointer-events: none;
+}
+@keyframes xhs-play-pulse {
+  0% { transform: scale(1); opacity: 0.7; }
+  100% { transform: scale(1.25); opacity: 0; }
+}
+.xhs-viewer-video-cover:hover .xhs-viewer-play-btn {
+  background: rgba(255, 36, 66, 0.7);
+  transform: scale(1.08);
+}
+.xhs-viewer-video-cover:hover .xhs-viewer-play-btn svg {
+  transform: scale(1.08);
+}
+.xhs-viewer-video-cover:active .xhs-viewer-play-btn {
+  transform: scale(0.94);
+}
+
+/* ====== 自定义控制栏 ====== */
+.xhs-viewer-video-controls {
+  position: absolute;
+  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: linear-gradient(to top, rgba(0,0,0,0.65) 0%, rgba(0,0,0,0.25) 100%);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: opacity 0.4s ease;
+}
+.xhs-viewer-video-controls.is-idle {
+  opacity: 0;
+}
+
+.xhs-viewer-ctrl-btn {
+  width: 30px;
+  height: 30px;
+  border: none;
+  background: transparent;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 0.15s;
+  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+}
+.xhs-viewer-ctrl-btn:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+.xhs-viewer-ctrl-time {
+  font-size: 11px;
+  color: rgba(255,255,255,0.85);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  min-width: 32px;
+  text-align: center;
+  user-select: none;
+}
+.xhs-viewer-ctrl-duration {
+  color: rgba(255,255,255,0.55);
+}
+
+/* 进度条 */
+.xhs-viewer-ctrl-progress {
+  flex: 1;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  min-width: 0;
+  position: relative;
+}
+.xhs-viewer-ctrl-track {
+  position: relative;
+  width: 100%;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.18);
+  transition: height 0.2s ease;
+}
+.xhs-viewer-ctrl-progress:hover .xhs-viewer-ctrl-track,
+.xhs-viewer-ctrl-progress.is-dragging .xhs-viewer-ctrl-track {
+  height: 6px;
+}
+.xhs-viewer-ctrl-progress:hover .xhs-viewer-ctrl-track {
+  box-shadow: 0 0 8px rgba(255,36,66,0.3);
+}
+.xhs-viewer-ctrl-buffered {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(255,255,255,0.2);
+}
+.xhs-viewer-ctrl-filled {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #ff2442, #ff6b81);
+  transition: width 0.1s linear;
+}
+.xhs-viewer-ctrl-thumb {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+  opacity: 0;
+  transform-origin: center center;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+.xhs-viewer-ctrl-progress:hover .xhs-viewer-ctrl-thumb,
+.xhs-viewer-ctrl-progress.is-dragging .xhs-viewer-ctrl-thumb {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.15);
+}
+
+/* 悬停时间预览 */
+.xhs-viewer-ctrl-preview {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  transform: translateX(-50%);
+  padding: 3px 7px;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.8);
+  color: #fff;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+.xhs-viewer-ctrl-preview::after {
+  content: '';
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 4px solid transparent;
+  border-top-color: rgba(0,0,0,0.8);
 }
 
 /* 视频标记（渐变紫调区别于 live 红色） */
@@ -869,11 +1256,91 @@ watch(() => props.visible, (val) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-decoration: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  transition: color 0.2s ease;
+}
+.xhs-viewer-author-name::after {
+  content: '↗';
+  font-size: 11px;
+  opacity: 0;
+  transform: translateY(-1px);
+  transition: opacity 0.2s ease;
+}
+.xhs-viewer-author-name:hover {
+  color: #ff2442;
+}
+.xhs-viewer-author-name:hover::after {
+  opacity: 0.6;
 }
 .xhs-viewer-author-date {
   font-size: 12px;
   color: #999;
   margin-top: 2px;
+}
+
+/* 详情收藏按钮 */
+.xhs-viewer-fav-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+  margin-left: auto;
+}
+.xhs-viewer-fav-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.xhs-viewer-fav-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}
+.xhs-viewer-fav-btn.is-favorited {
+  background: #fee2e2;
+  color: #ef4444;
+}
+.xhs-viewer-fav-btn.is-favorited:hover {
+  background: #fecaca;
+  color: #dc2626;
+}
+
+/* 详情删除按钮 */
+.xhs-viewer-del-btn {
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: #f3f4f6;
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  flex-shrink: 0;
+  outline: none;
+  padding: 0;
+}
+.xhs-viewer-del-btn svg {
+  width: 18px;
+  height: 18px;
+}
+.xhs-viewer-del-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
 }
 
 .xhs-viewer-title {

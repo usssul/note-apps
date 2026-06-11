@@ -1,4 +1,4 @@
-import { getXhsListApi, getXhsStatisticsApi, getXhsDetailApi } from '@/api/xhs'
+import { getXhsListApi, getXhsStatisticsApi, getXhsDetailApi, toggleFavoriteApi, deleteXhsNoteApi } from '@/api/xhs'
 
 const MINIO_BASE = 'http://localhost:9000'
 
@@ -22,9 +22,11 @@ export function useXhsApi() {
   const searchKeyword = ref('')
   const filterUserId = ref('')
   const filterType = ref('')
+  const filterIsFavorited = ref(false)
 
   // ---- 类型计数 ----
   const typeCounts = ref<{ type: string; count: number }[]>([])
+  const favoritedCount = ref(0)
 
   // ---- 统计状态 ----
   const statsTotal = ref(0)
@@ -47,6 +49,7 @@ export function useXhsApi() {
         keyword: searchKeyword.value || undefined,
         userId: filterUserId.value || undefined,
         type: filterType.value || undefined,
+        isFavorited: filterIsFavorited.value || undefined,
       })
       // ResponseDto 格式: { code: 0, data: { list, total, page, limit, totalPages }, ... }
       const list = res.data?.list ?? []
@@ -69,10 +72,14 @@ export function useXhsApi() {
           userId: item.note?.user?.userId || '',
           userName: item.note?.user?.nickname || '未知',
           userAvatar: toFullUrl(item.note?.user?.avatar),
+          // 收藏状态
+          isFavorited: item.isFavorited || false,
+          favoritedAt: item.favoritedAt || null,
         }
       })
       total.value = res.data?.total ?? 0
       if (res.data?.typeCounts) typeCounts.value = res.data.typeCounts
+      favoritedCount.value = res.data?.favoritedCount ?? 0
       if (page) currentPage.value = page
     } catch (e: any) {
       error.value = e.message || '加载失败'
@@ -121,9 +128,12 @@ export function useXhsApi() {
       }
 
       currentDetail.value = {
-        title: detail.note?.title || '无标题',
+        _id: detail._id || noteId,
+        isFavorited: detail.isFavorited || false,
+        title: detail.note?.title || detail.note?.desc || '无标题',
         description: detail.note?.desc || '',
         author: detail.note?.user?.nickname || '未知',
+        userId: detail.note?.user?.userId || '',
         authorAvatar: toFullUrl(detail.note?.user?.avatar),
         create_date: detail.note?.time
           ? new Date(detail.note.time).toLocaleString('zh-CN')
@@ -183,13 +193,76 @@ export function useXhsApi() {
     fetchList(1)
   }
 
+  // ---- 方法：删除笔记 ----
+  async function deleteNote(noteId: string) {
+    try {
+      await deleteXhsNoteApi(noteId)
+      // 从本地列表移除
+      const idx = notes.value.findIndex((n: any) => n._id === noteId)
+      if (idx !== -1) notes.value.splice(idx, 1)
+      total.value = Math.max(0, total.value - 1)
+      // 关闭详情弹窗（如果正在查看该笔记）
+      if (currentDetail.value._id === noteId) {
+        showDetail.value = false
+        currentDetail.value = {}
+      }
+      // 刷新统计
+      fetchStatistics()
+      return true
+    } catch {
+      return false
+    }
+  }
+
+  // ---- 方法：切换收藏状态 ----
+  async function toggleFavorite(noteId: string) {
+    // 乐观更新：先改本地状态
+    const note = notes.value.find((n: any) => n._id === noteId)
+    const wasFavorited = note?.isFavorited ?? currentDetail.value?.isFavorited ?? false
+    const nowFavorited = !wasFavorited
+    if (note) {
+      note.isFavorited = nowFavorited
+      note.favoritedAt = nowFavorited ? new Date().toISOString() : null
+    }
+    // 同步更新详情弹窗
+    if (currentDetail.value._id === noteId) {
+      currentDetail.value.isFavorited = nowFavorited
+    }
+    // 乐观更新收藏计数
+    favoritedCount.value += nowFavorited ? 1 : -1
+    try {
+      const res = await toggleFavoriteApi(noteId)
+      // 用服务端返回值校准
+      if (note) {
+        note.isFavorited = res.data?.isFavorited ?? note.isFavorited
+        note.favoritedAt = res.data?.favoritedAt ?? note.favoritedAt
+      }
+      if (currentDetail.value._id === noteId) {
+        currentDetail.value.isFavorited = res.data?.isFavorited ?? currentDetail.value.isFavorited
+      }
+    } catch {
+      // 失败回滚
+      if (note) {
+        note.isFavorited = !note.isFavorited
+        note.favoritedAt = note.isFavorited ? new Date().toISOString() : null
+      }
+      if (currentDetail.value._id === noteId) {
+        currentDetail.value.isFavorited = !currentDetail.value.isFavorited
+      }
+      // 回滚计数
+      favoritedCount.value += wasFavorited ? 1 : -1
+    }
+  }
+
   return {
     notes, loading, error, total, currentPage, pageSize, totalPages,
-    searchKeyword, filterUserId, filterType, typeCounts,
+    searchKeyword, filterUserId, filterType, filterIsFavorited, typeCounts, favoritedCount,
     statsTotal,
     showDetail, currentDetail,
     fetchList, fetchStatistics,
     fetchDetail, openDetail, changePage, changePageSize,
+    toggleFavorite,
+    deleteNote,
   }
 }
 

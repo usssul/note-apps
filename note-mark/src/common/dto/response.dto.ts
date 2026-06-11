@@ -28,7 +28,7 @@ export class ResponseDto<T = any> {
   /**
    * 成功响应
    */
-  static success<T>(data?: T, message: string = RESPONSE_MESSAGE.FAILURE): ResponseDto<T> {
+  static success<T>(data?: T, message: string = RESPONSE_MESSAGE.SUCCESS): ResponseDto<T> {
     return new ResponseDto(RESPONSE_CODE.SUCCESS, message, data);
   }
 

@@ -28,6 +28,7 @@ export async function getAllMatches() {
 export function injectGlobalStyles(styleText){
    if (!document.getElementById('xiaohongshu-global-styles')) {
       const style = document.createElement('style')
+      style.setAttribute('type', 'text/css')
       style.id = 'xiaohongshu-global-styles'
       style.textContent = styleText
       document.head.appendChild(style)

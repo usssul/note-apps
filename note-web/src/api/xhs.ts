@@ -9,6 +9,7 @@ export function getXhsListApi(params: {
   title?: string
   userId?: string
   type?: string
+  isFavorited?: boolean
 } = {}) {
   return request({
     url: '/xhs/list',
@@ -21,6 +22,7 @@ export function getXhsListApi(params: {
       ...(params.title && { title: params.title }),
       ...(params.userId && { userId: params.userId }),
       ...(params.type && { type: params.type }),
+      ...(params.isFavorited !== undefined && { isFavorited: params.isFavorited }),
     },
   });
 }
@@ -46,5 +48,21 @@ export function getXhsDashboardApi() {
   return request({
     url: '/xhs/statistics/dashboard',
     method: 'get',
+  });
+}
+
+/** 删除笔记 */
+export function deleteXhsNoteApi(noteId: string) {
+  return request({
+    url: `/xhs/note/${noteId}`,
+    method: 'delete',
+  });
+}
+
+/** 切换笔记收藏状态 */
+export function toggleFavoriteApi(noteId: string) {
+  return request({
+    url: `/xhs/note/${noteId}/favorite`,
+    method: 'patch',
   });
 }

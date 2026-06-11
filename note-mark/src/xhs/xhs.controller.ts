@@ -31,20 +31,9 @@ export class XhsController {
   async create(@Body() createXhsDTO: CreateXhsDTO) {
     try {
       const result = await this.xhsService.create(createXhsDTO);
-      return {
-        success: true,
-        message: '笔记创建成功',
-        data: result,
-      };
+      return ResponseDto.success(result._id, '笔记创建成功');
     } catch (error) {
-      console.error('[XhsController] create 错误:', error);
-      throw new HttpException(
-        {
-          success: false,
-          message: `创建笔记失败: ${error.message}`,
-        },
-        error.status || HttpStatus.INTERNAL_SERVER_ERROR
-      );
+      return ResponseDto.error(error.message || '创建笔记失败');
     }
   }
 
@@ -141,6 +130,26 @@ export class XhsController {
   //     );
   //   }
   // }
+
+  /**
+   * 切换收藏状态
+   * @param noteId
+   * @returns
+   */
+  @Patch('note/:noteId/favorite')
+  @ApiOperation({ summary: '切换收藏状态', description: '切换指定笔记的收藏状态' })
+  @ApiParam({ name: 'noteId', description: '笔记 ID' })
+  async toggleFavorite(@Param('noteId') noteId: string) {
+    try {
+      const result = await this.xhsService.toggleFavorite(noteId);
+      return ResponseDto.success(
+        { isFavorited: result.isFavorited, favoritedAt: result.favoritedAt },
+        result.isFavorited ? '收藏成功' : '已取消收藏',
+      );
+    } catch (error) {
+      return ResponseDto.error(error.message || '操作失败');
+    }
+  }
 
   /**
    * 删除笔记
@@ -246,6 +255,7 @@ export class XhsController {
   @ApiQuery({ name: 'title', required: false, type: String, description: '按笔记标题搜索' })
   @ApiQuery({ name: 'userId', required: false, type: String, description: '按用户 ID 精确筛选' })
   @ApiQuery({ name: 'type', required: false, type: String, description: '按笔记类型筛选：normal（图文）| video（视频）' })
+  @ApiQuery({ name: 'isFavorited', required: false, type: Boolean, description: '按收藏状态筛选：true 只显示收藏' })
   async findAll(
     @Query('page') page?: string,
     @Query('limit') limit?: string,
@@ -254,11 +264,14 @@ export class XhsController {
     @Query('title') title?: string,
     @Query('userId') userId?: string,
     @Query('type') type?: string,
+    @Query('isFavorited') isFavorited?: string,
   ) {
     try {
       const pageNum = parseInt(page, 10) || 1;
       const limitNum = parseInt(limit, 10) || 20;
-      const search = keyword || nickname || title || userId || type ? { keyword, nickname, title, userId, type } : undefined;
+      const favFilter = isFavorited !== undefined ? isFavorited === 'true' : undefined;
+      const hasFilter = keyword || nickname || title || userId || type || favFilter !== undefined;
+      const search = hasFilter ? { keyword, nickname, title, userId, type, isFavorited: favFilter } : undefined;
       const result = await this.xhsService.findAll(pageNum, limitNum, search);
       return ResponseDto.success(result, '获取笔记列表成功');
     } catch (error) {

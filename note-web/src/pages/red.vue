@@ -25,7 +25,7 @@
           <div v-for="tag in filterTags" :key="tag.value"
             @click="setTypeFilter(tag.value)"
             class="px-4 py-2 rounded-full text-sm cursor-pointer transition-colors select-none"
-            :class="filterType === tag.value && !activeUserId ? 'bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'">
+            :class="isTagActive(tag.value) && !activeUserId ? 'bg-red-500 text-white' : 'bg-gray-200 hover:bg-gray-300 text-gray-700'">
             {{ tag.label }}
             <span
               v-if="typeCounts.length"
@@ -138,13 +138,43 @@
               class="absolute top-2 left-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1">
               <span class="text-xs font-bold live-name">动图</span>
             </span>
+
+            <!-- 收藏按钮 -->
+            <button
+              @click.stop="toggleFavorite(note._id)"
+              class="absolute top-2 right-2 w-9 h-9 rounded-full flex items-center justify-center
+                transition-all duration-200 z-10
+                hover:scale-110 active:scale-90"
+              :class="note.isFavorited
+                ? 'bg-white/90 shadow-md text-red-500'
+                : 'bg-black/40 text-white opacity-0 group-hover:opacity-100'"
+              :title="note.isFavorited ? '取消收藏' : '收藏'"
+            >
+              <svg class="w-5 h-5" viewBox="0 0 24 24" :fill="note.isFavorited ? 'currentColor' : 'none'" stroke="currentColor" stroke-width="2">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+              </svg>
+            </button>
+            <!-- 删除按钮 -->
+            <button
+              @click.stop="handleDelete(note._id)"
+              class="absolute top-12 right-2 w-9 h-9 rounded-full flex items-center justify-center
+                transition-all duration-200 z-10
+                hover:scale-110 active:scale-90
+                bg-black/40 text-white opacity-0 group-hover:opacity-100"
+              title="删除笔记"
+            >
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="3 6 5 6 21 6" />
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+              </svg>
+            </button>
           </div>
 
           <!-- 内容区 -->
           <div class="pt-2 pb-4 px-4 flex flex-col justify-between flex-1">
             <div class="flex-1">
               <!-- 标题 -->
-              <h3 class="font-semibold text-lg mb-1 desc-limit-2">{{ note.note?.title || '无标题' }}</h3>
+              <h3 class="font-semibold text-lg mb-1 desc-limit-2">{{ note.note?.title || note.note?.desc || '无标题' }}</h3>
               <!-- 描述 -->
               <!-- <div v-if="note.note?.desc" class="text-neutral text-sm mb-3 desc-limit">{{ note.note.desc }}</div> -->
             </div>
@@ -213,7 +243,14 @@
     </footer>
 
     <!-- 详情弹窗 -->
-    <ImageDetailViewer v-model:visible="showDetail" :image-data="currentDetail" />
+    <ImageDetailViewer
+      v-model:visible="showDetail"
+      :image-data="currentDetail"
+      :note-id="currentDetail._id || ''"
+      :is-favorited="currentDetail.isFavorited || false"
+      @toggle-favorite="toggleFavorite"
+      @delete="handleDelete"
+    />
   </div>
 </template>
 
@@ -225,15 +262,18 @@ const filterTags = [
   { label: '全部', value: '' },
   { label: '图文', value: 'normal' },
   { label: '视频', value: 'video' },
+  { label: '收藏', value: 'favorite' },
 ]
 
 const {
   notes, loading, error, total, currentPage, pageSize, totalPages,
-  searchKeyword, filterUserId, filterType, typeCounts,
+  searchKeyword, filterUserId, filterType, filterIsFavorited, typeCounts, favoritedCount,
   statsTotal,
   showDetail, currentDetail,
   fetchList, fetchStatistics,
   openDetail, changePage, changePageSize,
+  toggleFavorite,
+  deleteNote,
 } = useXhsApi()
 
 const activeUserId = ref('')
@@ -278,6 +318,7 @@ function doSearch() {
   activeUserName.value = ''
   filterUserId.value = ''
   filterType.value = ''
+  filterIsFavorited.value = false
   currentPage.value = 1
   fetchList(1)
 }
@@ -287,12 +328,19 @@ function clearSearch() {
   searchKeyword.value = ''
   filterUserId.value = ''
   filterType.value = ''
+  filterIsFavorited.value = false
   fetchList(1)
 }
 
 // 类型切换 → 服务端筛选
 function setTypeFilter(t: string) {
-  filterType.value = t
+  if (t === 'favorite') {
+    filterIsFavorited.value = true
+    filterType.value = ''
+  } else {
+    filterIsFavorited.value = false
+    filterType.value = t
+  }
   activeUserId.value = ''
   activeUserName.value = ''
   filterUserId.value = ''
@@ -309,19 +357,46 @@ function filterByUser(userId: string, userName: string) {
   searchKeyword.value = ''
   filterUserId.value = userId
   filterType.value = ''
+  filterIsFavorited.value = false
   currentPage.value = 1
   fetchList(1)
+}
+
+async function handleDelete(noteId: string) {
+  try {
+    await ElMessageBox.confirm('确定要删除这篇笔记吗？此操作不可撤销。', '确认删除', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning',
+      confirmButtonClass: 'el-button--danger',
+      zIndex: 10000,
+    })
+  } catch {
+    return // 用户取消
+  }
+  await deleteNote(noteId)
+  ElMessage.success('笔记已删除')
 }
 
 function clearUserFilter() {
   activeUserId.value = ''
   activeUserName.value = ''
   filterUserId.value = ''
+  filterIsFavorited.value = false
   fetchList(1)
+}
+
+// 判断标签是否激活（支持普通类型和收藏）
+function isTagActive(value: string): boolean {
+  if (value === 'favorite') return filterIsFavorited.value
+  // 全部：当没有任何筛选条件时才激活
+  if (value === '') return !filterType.value && !filterIsFavorited.value
+  return filterType.value === value
 }
 
 // 获取指定类型的笔记数量
 function getTypeCount(type: string): string {
+  if (type === 'favorite') return String(favoritedCount.value)
   if (!type) {
     // 全部 = 所有类型之和
     const total = typeCounts.value.reduce((sum, t) => sum + t.count, 0)
